@@ -1,0 +1,62 @@
+import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from "docx";
+import { writeFile } from "node:fs/promises";
+import type { ScriptDoc } from "../domain/types.js";
+
+const PT = (n: number) => n * 2; // docx uses half-points
+
+/** Split a beat into runs, highlighting [CONFIRM: ...] and (click). */
+function beatRuns(text: string, click: boolean): TextRun[] {
+  const runs: TextRun[] = [];
+  const re = /\[CONFIRM:[^\]]*\]/g;
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    const idx = m.index!;
+    if (idx > last) runs.push(new TextRun({ text: text.slice(last, idx), size: PT(11) }));
+    runs.push(new TextRun({ text: m[0], size: PT(11), bold: true, highlight: "yellow" }));
+    last = idx + m[0].length;
+  }
+  if (last < text.length) runs.push(new TextRun({ text: text.slice(last), size: PT(11) }));
+  if (click) runs.push(new TextRun({ text: " (click)", size: PT(11), color: "888888", italics: true }));
+  return runs;
+}
+
+export function buildScriptDocument(doc: ScriptDoc, lang: "ko" | "en" = "ko"): Document {
+  const t = lang === "en"
+    ? { title: `${doc.companyName} — Presentation Script`, dur: `Duration ${doc.presentationMinutes} min` }
+    : { title: `${doc.companyName} — 발표 스크립트`, dur: `발표 시간 ${doc.presentationMinutes}분` };
+  const children: Paragraph[] = [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: t.title, bold: true, size: PT(16) })],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: t.dur, size: PT(10), color: "666666" })],
+    }),
+    new Paragraph({ text: "" }),
+  ];
+
+  for (const s of doc.sections) {
+    children.push(
+      new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        children: [new TextRun({ text: `§${s.no}  (${s.title})`, bold: true, size: PT(13) })],
+      }),
+    );
+    for (const b of s.beats) {
+      children.push(new Paragraph({ spacing: { after: 60 }, children: beatRuns(b.text, b.click) }));
+    }
+    children.push(new Paragraph({ text: "" }));
+  }
+
+  return new Document({
+    styles: { default: { document: { run: { font: "맑은 고딕", size: PT(11) } } } },
+    sections: [{ children }],
+  });
+}
+
+export async function writeScriptDocx(doc: ScriptDoc, outPath: string, lang: "ko" | "en" = "ko"): Promise<string> {
+  const buffer = await Packer.toBuffer(buildScriptDocument(doc, lang));
+  await writeFile(outPath, buffer);
+  return outPath;
+}

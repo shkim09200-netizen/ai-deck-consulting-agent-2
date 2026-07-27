@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+.next/
+*.log
+.env
+.env.local
+~$*
+*.tsbuildinfo
+
+# Confidential client & proprietary SparkLabs material — never publish
+samples/
+.data/
+
+# Local scratch / diagnostics
+_dev.bat
+_ssr_preview.tsx
