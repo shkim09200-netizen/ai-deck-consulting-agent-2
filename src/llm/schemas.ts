@@ -2,6 +2,32 @@ import { z } from "zod";
 import type Anthropic from "@anthropic-ai/sdk";
 import { CompanyInputSchema } from "../domain/types.js";
 
+/**
+ * Tolerate the model handing back a structured value as a JSON *string* — a
+ * Sonnet quirk on complex tool inputs, sometimes re-wrapped as `{<key>: [...]}`.
+ * Parse (and unwrap) so one formatting slip doesn't crash the whole generation.
+ */
+function jsonish<T extends z.ZodTypeAny>(inner: T, unwrapKey?: string) {
+  return z.preprocess((v) => {
+    if (typeof v !== "string") return v;
+    try {
+      const p: unknown = JSON.parse(v);
+      if (
+        unwrapKey &&
+        p &&
+        typeof p === "object" &&
+        !Array.isArray(p) &&
+        Array.isArray((p as Record<string, unknown>)[unwrapKey])
+      ) {
+        return (p as Record<string, unknown>)[unwrapKey];
+      }
+      return p;
+    } catch {
+      return v;
+    }
+  }, inner);
+}
+
 /* ---------- Ingestion: extract/merge CompanyInput ---------- */
 
 export const companyInputJsonSchema: Anthropic.Tool.InputSchema = {
@@ -156,13 +182,16 @@ export const scriptJsonSchema: Anthropic.Tool.InputSchema = {
   required: ["sections"],
 };
 export const scriptValidator = z.object({
-  sections: z.array(
-    z.object({
-      no: z.number(),
-      key: z.string(),
-      title: z.string(),
-      beats: z.array(z.object({ text: z.string(), click: z.boolean().default(false) })),
-    }),
+  sections: jsonish(
+    z.array(
+      z.object({
+        no: z.number().catch(0),
+        key: z.string().catch(""),
+        title: z.string().catch(""),
+        beats: jsonish(z.array(z.object({ text: z.string(), click: z.boolean().default(false) })), "beats"),
+      }),
+    ),
+    "sections",
   ),
 });
 export type ScriptOutput = z.infer<typeof scriptValidator>;
@@ -365,7 +394,7 @@ export const skeletonSlideValidator = z.object({
 
 export const skeletonValidator = z.object({
   accentColor: z.string().optional(),
-  slides: z.array(skeletonSlideValidator),
+  slides: jsonish(z.array(skeletonSlideValidator), "slides"),
 });
 export type SkeletonOutput = z.infer<typeof skeletonValidator>;
 

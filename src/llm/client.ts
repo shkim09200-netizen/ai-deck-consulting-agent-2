@@ -67,7 +67,17 @@ export async function callTool<S extends z.ZodTypeAny>(opts: ToolCallOptions<S>)
       `Tool ${opts.toolName} output was truncated at max_tokens (${opts.maxTokens ?? 8000}). Raise maxTokens or split the request.`,
     );
   }
-  const parsed = opts.validator.safeParse(block.input);
+  // Sonnet occasionally returns the whole tool input as a JSON string — parse it
+  // before validating so field-level tolerance in the validators can kick in.
+  let toolInput: unknown = block.input;
+  if (typeof toolInput === "string") {
+    try {
+      toolInput = JSON.parse(toolInput);
+    } catch {
+      /* leave as-is; the validator will surface a clear error */
+    }
+  }
+  const parsed = opts.validator.safeParse(toolInput);
   if (!parsed.success) {
     throw new Error(
       `Tool ${opts.toolName} returned schema-invalid input:\n${parsed.error.toString()}\nraw: ${JSON.stringify(block.input).slice(0, 800)}`,
