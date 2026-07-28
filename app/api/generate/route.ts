@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createJob, snapshot } from "@/lib/jobs";
+import { createJob } from "@/lib/jobs";
 import { ownerFromRequest } from "@/lib/store";
 import { storage } from "@/lib/storage";
 import { hasApiKey } from "@engine/llm/client.js";
@@ -56,7 +56,9 @@ export async function POST(req: NextRequest) {
     // the finished snapshot — no fire-and-forget/SSE, which can't survive a
     // serverless invocation. The client shows progress locally while it waits.
     const job = await createJob(files, { directives, urls, projectId, owner: ownerFromRequest(req) });
-    return NextResponse.json(snapshot(job));
+    // return the FULL job (incl. carried work state) so the client can drive the
+    // remaining steps by sending it back — robust even without shared storage.
+    return NextResponse.json(job);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // Most likely a read-only filesystem (e.g. serverless hosts like Vercel):

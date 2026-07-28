@@ -181,7 +181,13 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
       // no single call exceeds the serverless time limit.
       let guard = 0;
       while (s.status === "running" && guard++ < 12) {
-        const r = await fetch(`/api/jobs/${s.id}/advance`, { method: "POST" });
+        // carry the job state in the body so a step landing on a fresh server
+        // (or a not-yet-consistent storage read) never yields "job not found".
+        const r = await fetch(`/api/jobs/${s.id}/advance`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job: s }),
+        });
         if (!r.ok) {
           const j = await r.json().catch(() => ({}));
           setErr(j.error || "생성 중 오류가 발생했습니다."); setPhase("error"); return;

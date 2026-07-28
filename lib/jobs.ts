@@ -127,6 +127,23 @@ export async function getOrLoadJob(id: string): Promise<Job | undefined> {
   return jobs.get(id);
 }
 
+/**
+ * Load a job (storage-first), or adopt a client-carried copy when storage
+ * doesn't have it. This makes the staged pipeline robust on serverless even
+ * without shared storage — the browser carries the job state between steps, so
+ * a request landing on a fresh instance (or a not-yet-consistent Blob read)
+ * still finds the job. The adopted copy is validated to match the id.
+ */
+export async function loadOrAdoptJob(id: string, fallback?: Job | null): Promise<Job | undefined> {
+  const found = await getOrLoadJob(id);
+  if (found) return found;
+  if (fallback && fallback.id === id && Array.isArray(fallback.stages)) {
+    jobs.set(id, fallback);
+    return fallback;
+  }
+  return undefined;
+}
+
 export function snapshot(job: Job) {
   return {
     id: job.id,
@@ -212,7 +229,9 @@ export async function createJob(
     const input = await extractCompanyInput(sources, job.directives);
     setStage(job, "ingest", "done", `${input.companyName} · 발표 ${input.meta.presentationMinutes}분`);
 
-    job.work = { input, sources };
+    // Strip image base64 so the (client-carried) work state stays small enough
+    // to travel back in each request body. Gap analysis works on source text.
+    job.work = { input, sources: sources.map((s) => ({ ...s, image: undefined })) };
     job.phase = "ingested";
     bump(job);
     await persistJob(job);
