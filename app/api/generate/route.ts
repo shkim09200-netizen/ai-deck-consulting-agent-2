@@ -30,9 +30,18 @@ export async function POST(req: NextRequest) {
   const uploadRefsRaw = form.get("uploadRefs");
   if (typeof uploadRefsRaw === "string" && uploadRefsRaw.trim()) {
     try {
-      const refs = JSON.parse(uploadRefsRaw) as Array<{ name: string; key: string }>;
+      const refs = JSON.parse(uploadRefsRaw) as Array<{ name: string; key: string; url?: string }>;
       for (const r of refs) {
-        const buf = await storage.getBinary(r.key);
+        let buf: Buffer | null = null;
+        if (r.url) {
+          try {
+            const resp = await fetch(r.url);
+            if (resp.ok) buf = Buffer.from(await resp.arrayBuffer());
+          } catch {
+            /* fall through to storage read */
+          }
+        }
+        if (!buf) buf = await storage.getBinary(r.key);
         if (buf) files.push({ name: r.name, buffer: buf });
       }
     } catch {

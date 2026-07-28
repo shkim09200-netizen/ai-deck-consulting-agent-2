@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import SlideCanvas, { SlideChecklist } from "./slide/SlideCanvas";
 import VariantPicker from "./slide/VariantPicker";
 import GapReport from "./GapReport";
@@ -140,21 +141,24 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
       // presigned URL so they bypass the serverless 4.5MB request-body limit;
       // only the storage key is sent to the API. Small files ride along inline.
       const fd = new FormData();
-      const uploadRefs: Array<{ name: string; key: string }> = [];
+      const uploadRefs: Array<{ name: string; key: string; url?: string }> = [];
       const BIG = 4 * 1024 * 1024;
       for (const f of files) {
         if (f.size >= BIG) {
           try {
             const ct = f.type || "application/octet-stream";
-            const { key, url } = await fetch("/api/upload-url", {
+            const info = await fetch("/api/upload-url", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ filename: f.name, contentType: ct }),
             }).then((r) => r.json());
-            if (url) {
-              const put = await fetch(url, { method: "PUT", body: f, headers: { "Content-Type": ct } });
+            if (info.provider === "r2" && info.url) {
+              const put = await fetch(info.url, { method: "PUT", body: f, headers: { "Content-Type": ct } });
               if (!put.ok) throw new Error("upload failed");
-              uploadRefs.push({ name: f.name, key });
+              uploadRefs.push({ name: f.name, key: info.key });
+            } else if (info.provider === "blob") {
+              const res = await upload(info.key, f, { access: "public", handleUploadUrl: "/api/blob/upload" });
+              uploadRefs.push({ name: f.name, key: info.key, url: res.url });
             } else {
               fd.append("files", f); // no object storage configured → send inline
             }

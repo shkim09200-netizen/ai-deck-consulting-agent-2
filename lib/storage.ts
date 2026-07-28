@@ -176,6 +176,10 @@ function fsStorage(): Storage {
 
 export const storage: Storage = useR2 ? r2Storage() : useBlob ? blobStorage() : fsStorage();
 
+/** Which backend is active — lets the upload route tell the client how to send
+ *  large files directly (R2 presigned PUT vs Blob client upload vs inline). */
+export const storageProvider: "r2" | "blob" | "fs" = useR2 ? "r2" : useBlob ? "blob" : "fs";
+
 export const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 export const PPTX_MIME =
