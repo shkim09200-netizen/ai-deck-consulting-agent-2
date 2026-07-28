@@ -32,7 +32,11 @@ interface StoreData {
   folders: Folder[];
 }
 
-const DATA_ROOT = path.join(process.cwd(), ".data");
+// Defaults to `<cwd>/.data`; override with DECK_DATA_DIR to use a mounted
+// volume (e.g. Railway /app/.data) so projects/folders survive redeploys.
+const DATA_ROOT = process.env.DECK_DATA_DIR
+  ? path.resolve(process.env.DECK_DATA_DIR)
+  : path.join(process.cwd(), ".data");
 const STORE_FILE = path.join(DATA_ROOT, "store.json");
 
 const g = globalThis as unknown as { __deckStore?: StoreData };

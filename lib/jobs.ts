@@ -80,7 +80,12 @@ export interface Job {
 const globalStore = globalThis as unknown as { __deckJobs?: Map<string, Job> };
 const jobs: Map<string, Job> = (globalStore.__deckJobs ??= new Map<string, Job>());
 
-const DATA_ROOT = path.join(process.cwd(), ".data");
+// Where jobs, uploads, and generated files live. Defaults to `<cwd>/.data`,
+// but can be pointed at a mounted volume via DECK_DATA_DIR (e.g. Railway's
+// /app/.data volume) so data survives redeploys regardless of cwd.
+const DATA_ROOT = process.env.DECK_DATA_DIR
+  ? path.resolve(process.env.DECK_DATA_DIR)
+  : path.join(process.cwd(), ".data");
 
 const jobJsonPath = (dir: string) => path.join(dir, "job.json");
 

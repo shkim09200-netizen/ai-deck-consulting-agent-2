@@ -34,6 +34,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "업로드된 파일이나 웹사이트 링크가 없습니다." }, { status: 400 });
   }
 
-  const job = await createJob(files, { directives, urls, projectId });
-  return NextResponse.json({ jobId: job.id });
+  try {
+    const job = await createJob(files, { directives, urls, projectId });
+    return NextResponse.json({ jobId: job.id });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // Most likely a read-only filesystem (e.g. serverless hosts like Vercel):
+    // this app needs a writable disk. Surface the real reason instead of a
+    // bare 500 so the failure is diagnosable from the UI.
+    const hint = /EROFS|read-only|EACCES|EPERM|ENOENT/i.test(msg)
+      ? " — 서버 디스크에 쓸 수 없습니다. 이 앱은 쓰기 가능한 디스크가 있는 서버(예: Railway)가 필요합니다."
+      : "";
+    return NextResponse.json({ error: `생성을 시작하지 못했습니다: ${msg}${hint}` }, { status: 500 });
+  }
 }
