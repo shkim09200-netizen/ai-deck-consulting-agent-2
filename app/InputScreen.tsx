@@ -141,14 +141,28 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
     if (directives.trim()) fd.append("directives", directives.trim());
     if (urls.trim()) fd.append("urls", urls.trim());
     try {
+      // Step 1: parse + ingest (one short request)
       const res = await fetch("/api/generate", { method: "POST", body: fd });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         setErr(j.error || "생성을 시작하지 못했습니다."); setPhase("error"); return;
       }
-      const s: Snapshot = await res.json();
+      let s: Snapshot = await res.json();
       setSnap(s); setJobId(s.id);
+      // Steps 2..N: drive the staged pipeline, one bounded request per step, so
+      // no single call exceeds the serverless time limit.
+      let guard = 0;
+      while (s.status === "running" && guard++ < 12) {
+        const r = await fetch(`/api/jobs/${s.id}/advance`, { method: "POST" });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          setErr(j.error || "생성 중 오류가 발생했습니다."); setPhase("error"); return;
+        }
+        s = await r.json();
+        setSnap(s);
+      }
       if (s.status === "error") { setErr(s.error || "생성 중 오류가 발생했습니다."); setPhase("error"); return; }
+      if (s.status !== "done") { setErr("생성이 완료되지 않았습니다. 다시 시도해 주세요."); setPhase("error"); return; }
       setPhase("done"); setTab("gap");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "네트워크 오류가 발생했습니다."); setPhase("error");

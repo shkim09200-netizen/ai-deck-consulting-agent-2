@@ -54,6 +54,21 @@ export interface JobResult {
   };
 }
 
+/** How far the staged pipeline has progressed. Each client-driven step advances
+ * this one notch so no single request runs the whole (multi-minute) pipeline —
+ * required to stay under a serverless function's time limit. */
+export type JobPhase = "ingested" | "scripted" | "skeletoned" | "done";
+
+/** Intermediate pipeline state carried between steps (persisted with the job). */
+interface JobWork {
+  input: CompanyInput;
+  sources?: ParsedSource[];
+  gap?: GapAnalysis;
+  clarifications?: string[];
+  script?: ScriptDoc;
+  skeleton?: SkeletonDoc;
+}
+
 export interface Job {
   id: string;
   version: number;
@@ -64,6 +79,8 @@ export interface Job {
   directives?: string;
   urls?: string[];
   projectId?: string; // dashboard project this generation belongs to
+  phase?: JobPhase;
+  work?: JobWork;
   error?: string;
   result?: JobResult;
 }
@@ -94,16 +111,19 @@ export function getJob(id: string): Job | undefined {
 }
 
 /**
- * Return the job from the per-instance cache, or rehydrate it from durable
- * storage (`jobs/<id>/job.json`). Returns undefined if nothing is stored.
+ * Load a job, with **durable storage as the source of truth**. This matters on
+ * serverless: the staged pipeline may run each step on a different instance, so
+ * a per-instance cache can be stale (it wouldn't see another instance's
+ * update). We read storage first and only fall back to the local cache if
+ * storage has nothing yet (e.g. a momentary read miss right after create).
  */
 export async function getOrLoadJob(id: string): Promise<Job | undefined> {
-  const mem = jobs.get(id);
-  if (mem) return mem;
-  const job = await storage.getJson<Job>(jobJsonKey(id));
-  if (!job) return undefined;
-  jobs.set(id, job);
-  return job;
+  const stored = await storage.getJson<Job>(jobJsonKey(id));
+  if (stored) {
+    jobs.set(id, stored);
+    return stored;
+  }
+  return jobs.get(id);
 }
 
 export function snapshot(job: Job) {
@@ -139,12 +159,10 @@ function safeName(s: string): string {
 }
 
 /**
- * Run the whole pipeline for the uploaded files and return the finished job.
- *
- * Synchronous by design: on serverless there is no reliable way to keep
- * "fire-and-forget" work running after the response is sent, so generation
- * completes within this request (bounded by the route's maxDuration) and the
- * result is persisted to durable storage before returning.
+ * Start a job: parse the uploads and extract the company input (one LLM call).
+ * The rest of the pipeline runs in later `advanceJob` steps so no single request
+ * runs the whole multi-minute pipeline — this keeps each request under a
+ * serverless function's time limit. Returns the job at phase "ingested".
  */
 export async function createJob(
   files: Array<{ name: string; buffer: Buffer }>,
@@ -166,118 +184,145 @@ export async function createJob(
   jobs.set(id, job);
 
   try {
-    await runPipeline(job, files);
-  } catch (e) {
-    job.status = "error";
-    job.error = e instanceof Error ? e.message : String(e);
-    const active = job.stages.find((s) => s.status === "active");
-    if (active) active.status = "error";
+    // 1) parse — file buffers (no disk) + any website URLs
+    setStage(job, "parse", "active");
+    const sources: ParsedSource[] = [];
+    for (const f of files) {
+      try {
+        sources.push(await parseBuffer(f.name, f.buffer));
+      } catch {
+        /* skip unreadable file, keep going */
+      }
+    }
+    for (const u of job.urls ?? []) {
+      try {
+        const src = await parseUrl(u);
+        if (src.text) sources.push(src);
+      } catch {
+        /* skip unreachable url, keep going */
+      }
+    }
+    if (sources.length === 0) throw new Error("업로드된 자료를 파싱하지 못했습니다.");
+    setStage(job, "parse", "done", `${sources.length}개 소스`);
+
+    // 2) ingest (gap also needs the raw sources, so stash them on work via input)
+    setStage(job, "ingest", "active");
+    const input = await extractCompanyInput(sources, job.directives);
+    setStage(job, "ingest", "done", `${input.companyName} · 발표 ${input.meta.presentationMinutes}분`);
+
+    job.work = { input, sources };
+    job.phase = "ingested";
     bump(job);
     await persistJob(job);
+  } catch (e) {
+    failJob(job, e);
   }
 
   return job;
 }
 
-async function runPipeline(job: Job, files: Array<{ name: string; buffer: Buffer }>) {
-  // 1) parse — file buffers (no disk) + any website URLs
-  setStage(job, "parse", "active");
-  const sources: ParsedSource[] = [];
-  for (const f of files) {
-    try {
-      sources.push(await parseBuffer(f.name, f.buffer));
-    } catch {
-      /* skip unreadable file, keep going */
-    }
-  }
-  for (const u of job.urls ?? []) {
-    try {
-      const src = await parseUrl(u);
-      if (src.text) sources.push(src);
-    } catch {
-      /* skip unreachable url, keep going */
-    }
-  }
-  if (sources.length === 0) throw new Error("업로드된 자료를 파싱하지 못했습니다.");
-  setStage(job, "parse", "done", `${sources.length}개 소스`);
-
-  // 2) ingest
-  setStage(job, "ingest", "active");
-  const input = await extractCompanyInput(sources, job.directives);
-  setStage(job, "ingest", "done", `${input.companyName} · 발표 ${input.meta.presentationMinutes}분`);
-
-  // 2.5–4) gap, clarify and script all depend only on `input` (script does NOT
-  // need the gap), so run them concurrently to shorten the critical path.
-  setStage(job, "gap", "active");
-  setStage(job, "clarify", "active");
-  setStage(job, "script", "active");
-  const [gap, clar, script] = await Promise.all([
-    analyzeGaps(input, sources).then((g) => {
-      setStage(job, "gap", "done", `누락 섹션 ${g.missingSections.length} · 순서 이슈 ${g.orderIssues.length}`);
-      return g;
-    }),
-    getClarifications(input).then((c) => {
-      setStage(job, "clarify", "done", c.questions.length ? `${c.questions.length}개 질문` : "추가 질문 없음");
-      return c;
-    }),
-    generateScript(input, { directives: job.directives }).then((s) => {
-      setStage(job, "script", "done", `${s.sections.length}개 섹션`);
-      return s;
-    }),
-  ]);
-  const questions = clar.questions;
-
-  // 5) skeleton (gap-aware: missing data becomes [NEEDS INPUT] / placeholders)
-  setStage(job, "skeleton", "active");
-  const skeleton = await generateSkeleton(input, script, { directives: job.directives, gap });
-  setStage(job, "skeleton", "done", `${skeleton.slides.length}개 슬라이드`);
-
-  // 6) review (light model) runs concurrently with rendering — neither needs the other.
-  setStage(job, "review", "active");
-  const reviewP = reviewDeck(script, skeleton);
-  const tracker = buildTracker(script, skeleton);
-
-  const name = safeName(input.companyName);
-  const scriptDocx = `${name}_script_v0.1.docx`;
-  const skeletonPptx = `${name}_skeleton_v0.1.pptx`;
-  const [docxBuf, pptxBuf] = await Promise.all([
-    renderScriptDocxBuffer(script, "ko"),
-    renderSkeletonPptxBuffer(skeleton, "ko", skeleton.variant),
-  ]);
-  await Promise.all([
-    storage.putBinary(jobFileKey(job.id, scriptDocx), docxBuf, DOCX_MIME),
-    storage.putBinary(jobFileKey(job.id, skeletonPptx), pptxBuf, PPTX_MIME),
-  ]);
-  const review = await reviewP;
-  setStage(job, "review", "done", `${review.items.length}개 지적 · 미해결 ${tracker.length}건`);
-
-  job.result = {
-    companyName: input.companyName,
-    presentationMinutes: input.meta.presentationMinutes,
-    input,
-    clarifications: questions,
-    gap,
-    script,
-    skeleton,
-    review: review.items,
-    tracker,
-    files: { scriptDocx, skeletonPptx },
-  };
-  job.status = "done";
-  job.progress = 100;
+function failJob(job: Job, e: unknown) {
+  job.status = "error";
+  job.error = e instanceof Error ? e.message : String(e);
+  const active = job.stages.find((s) => s.status === "active");
+  if (active) active.status = "error";
   bump(job);
-  await persistJob(job); // durable result so reopening the project restores it
+}
 
-  // link this generation to its dashboard project (versions++, one-liner, name)
-  if (job.projectId) {
-    const cover = skeleton.slides.find((s) => s.layout === "cover");
-    const oneLiner = (cover?.subhead || skeleton.slides[0]?.subhead || "").trim();
-    await recordGeneration(job.projectId, {
-      jobId: job.id,
-      oneLiner: oneLiner || undefined,
-      companyName: input.companyName,
-    }).catch(() => {});
+/**
+ * Advance a running job by exactly one bounded step (one chunk of LLM work),
+ * persisting after each. The client calls this repeatedly until status is
+ * "done" or "error". Splitting the pipeline this way keeps every request short
+ * enough for serverless time limits.
+ */
+export async function advanceJob(job: Job): Promise<Job> {
+  if (job.status !== "running" || !job.work) return job;
+  try {
+    if (job.phase === "ingested") {
+      // gap + clarify + script (all derive from input) run concurrently
+      const input = job.work.input;
+      const sources = job.work.sources ?? [];
+      setStage(job, "gap", "active");
+      setStage(job, "clarify", "active");
+      setStage(job, "script", "active");
+      const [gap, clar, script] = await Promise.all([
+        analyzeGaps(input, sources).then((g) => {
+          setStage(job, "gap", "done", `누락 섹션 ${g.missingSections.length} · 순서 이슈 ${g.orderIssues.length}`);
+          return g;
+        }),
+        getClarifications(input).then((c) => {
+          setStage(job, "clarify", "done", c.questions.length ? `${c.questions.length}개 질문` : "추가 질문 없음");
+          return c;
+        }),
+        generateScript(input, { directives: job.directives }).then((s) => {
+          setStage(job, "script", "done", `${s.sections.length}개 섹션`);
+          return s;
+        }),
+      ]);
+      job.work.gap = gap;
+      job.work.clarifications = clar.questions;
+      job.work.script = script;
+      job.phase = "scripted";
+    } else if (job.phase === "scripted") {
+      const { input, script, gap } = job.work;
+      setStage(job, "skeleton", "active");
+      const skeleton = await generateSkeleton(input, script!, { directives: job.directives, gap });
+      setStage(job, "skeleton", "done", `${skeleton.slides.length}개 슬라이드`);
+      job.work.skeleton = skeleton;
+      job.phase = "skeletoned";
+    } else if (job.phase === "skeletoned") {
+      const { input, script, skeleton, gap, clarifications } = job.work;
+      setStage(job, "review", "active");
+      const review = await reviewDeck(script!, skeleton!);
+      const tracker = buildTracker(script!, skeleton!);
+
+      const name = safeName(input.companyName);
+      const scriptDocx = `${name}_script_v0.1.docx`;
+      const skeletonPptx = `${name}_skeleton_v0.1.pptx`;
+      const [docxBuf, pptxBuf] = await Promise.all([
+        renderScriptDocxBuffer(script!, "ko"),
+        renderSkeletonPptxBuffer(skeleton!, "ko", skeleton!.variant),
+      ]);
+      await Promise.all([
+        storage.putBinary(jobFileKey(job.id, scriptDocx), docxBuf, DOCX_MIME),
+        storage.putBinary(jobFileKey(job.id, skeletonPptx), pptxBuf, PPTX_MIME),
+      ]);
+      setStage(job, "review", "done", `${review.items.length}개 지적 · 미해결 ${tracker.length}건`);
+
+      job.result = {
+        companyName: input.companyName,
+        presentationMinutes: input.meta.presentationMinutes,
+        input,
+        clarifications: clarifications ?? [],
+        gap: gap!,
+        script: script!,
+        skeleton: skeleton!,
+        review: review.items,
+        tracker,
+        files: { scriptDocx, skeletonPptx },
+      };
+      job.status = "done";
+      job.progress = 100;
+      job.phase = "done";
+      job.work = undefined; // drop intermediate state now that result is assembled
+
+      if (job.projectId) {
+        const cover = skeleton!.slides.find((s) => s.layout === "cover");
+        const oneLiner = (cover?.subhead || skeleton!.slides[0]?.subhead || "").trim();
+        await recordGeneration(job.projectId, {
+          jobId: job.id,
+          oneLiner: oneLiner || undefined,
+          companyName: input.companyName,
+        }).catch(() => {});
+      }
+    }
+    bump(job);
+    await persistJob(job);
+  } catch (e) {
+    failJob(job, e);
+    await persistJob(job);
   }
+  return job;
 }
 
 /**
