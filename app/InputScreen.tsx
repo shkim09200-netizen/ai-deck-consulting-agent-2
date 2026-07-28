@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import SlideCanvas, { SlideChecklist } from "./slide/SlideCanvas";
 import VariantPicker from "./slide/VariantPicker";
 import GapReport from "./GapReport";
@@ -135,12 +136,29 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
       stages: STAGE_LABELS.map((label, i) => ({ key: String(i), label, status: "active" })),
       sourceNames: [...files.map((f) => f.name), ...urlNames],
     });
-    const fd = new FormData();
-    files.forEach((f) => fd.append("files", f));
-    fd.append("projectId", projectId);
-    if (directives.trim()) fd.append("directives", directives.trim());
-    if (urls.trim()) fd.append("urls", urls.trim());
     try {
+      // Large files (>4MB) are uploaded straight to Blob so they bypass the
+      // serverless 4.5MB request-body limit; only their URL is sent to the API.
+      // Small files ride along inline. (Blob path needs BLOB_READ_WRITE_TOKEN.)
+      const fd = new FormData();
+      const blobRefs: Array<{ name: string; url: string }> = [];
+      const BIG = 4 * 1024 * 1024;
+      for (const f of files) {
+        if (f.size >= BIG) {
+          try {
+            const { url } = await upload(f.name, f, { access: "public", handleUploadUrl: "/api/blob/upload" });
+            blobRefs.push({ name: f.name, url });
+          } catch {
+            fd.append("files", f); // fallback: send inline (may exceed the limit)
+          }
+        } else {
+          fd.append("files", f);
+        }
+      }
+      if (blobRefs.length) fd.append("blobRefs", JSON.stringify(blobRefs));
+      fd.append("projectId", projectId);
+      if (directives.trim()) fd.append("directives", directives.trim());
+      if (urls.trim()) fd.append("urls", urls.trim());
       // Step 1: parse + ingest (one short request)
       const res = await fetch("/api/generate", { method: "POST", body: fd });
       if (!res.ok) {

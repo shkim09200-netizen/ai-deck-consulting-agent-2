@@ -23,6 +23,25 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Large files are uploaded to Blob by the browser (to dodge the 4.5MB request
+  // limit) and referenced here by URL — fetch them into buffers server-side.
+  const blobRefsRaw = form.get("blobRefs");
+  if (typeof blobRefsRaw === "string" && blobRefsRaw.trim()) {
+    try {
+      const refs = JSON.parse(blobRefsRaw) as Array<{ name: string; url: string }>;
+      for (const r of refs) {
+        try {
+          const resp = await fetch(r.url);
+          if (resp.ok) files.push({ name: r.name, buffer: Buffer.from(await resp.arrayBuffer()) });
+        } catch {
+          /* skip a blob we can't fetch, keep going */
+        }
+      }
+    } catch {
+      /* malformed blobRefs — ignore */
+    }
+  }
+
   const directives = (form.get("directives") as string | null)?.trim() || undefined;
   const projectId = (form.get("projectId") as string | null)?.trim() || undefined;
   const urls = ((form.get("urls") as string | null) ?? "")
