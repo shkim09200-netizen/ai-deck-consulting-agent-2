@@ -55,8 +55,12 @@ export function buildScriptDocument(doc: ScriptDoc, lang: "ko" | "en" = "ko"): D
   });
 }
 
+/** Render the script to a docx Buffer (no disk) — used on serverless. */
+export async function renderScriptDocxBuffer(doc: ScriptDoc, lang: "ko" | "en" = "ko"): Promise<Buffer> {
+  return Packer.toBuffer(buildScriptDocument(doc, lang));
+}
+
 export async function writeScriptDocx(doc: ScriptDoc, outPath: string, lang: "ko" | "en" = "ko"): Promise<string> {
-  const buffer = await Packer.toBuffer(buildScriptDocument(doc, lang));
-  await writeFile(outPath, buffer);
+  await writeFile(outPath, await renderScriptDocxBuffer(doc, lang));
   return outPath;
 }

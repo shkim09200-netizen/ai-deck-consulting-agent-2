@@ -17,6 +17,18 @@ interface Snapshot {
 type Phase = "idle" | "running" | "done" | "error";
 type Tab = "gap" | "skeleton" | "script" | "tracker" | "review";
 
+// Mirrors the server pipeline stages. Generation runs synchronously (no live
+// stream on serverless), so we show these locally with an eased progress bar.
+const STAGE_LABELS = [
+  "자료 파싱",
+  "회사 정보 추출 (Ingestion)",
+  "Gap 분석 (SparkLabs 기준 진단)",
+  "명확화 질문 확인",
+  "Step 1 — Script 생성",
+  "Step 2 — Skeleton 생성",
+  "AI Review + 통합 트래커",
+];
+
 function ConfirmText({ text }: { text: string }) {
   const parts = text.split(/(\[CONFIRM:[^\]]*\])/g);
   return (
@@ -113,29 +125,48 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
 
   async function generate() {
     if (files.length === 0 && !hasUrls) return;
-    setPhase("running"); setSnap(null); setErr(undefined); setJobId(null);
+    setPhase("running"); setErr(undefined); setJobId(null);
     setLang("ko"); setEnData(null); setTransErr(undefined);
+    // Local placeholder progress: generation is synchronous server-side, so the
+    // real snapshot only arrives when it's finished. Show the stages meanwhile.
+    const urlNames = urls.split(/[\s,]+/).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u));
+    setSnap({
+      id: "", status: "running", progress: 4,
+      stages: STAGE_LABELS.map((label, i) => ({ key: String(i), label, status: "active" })),
+      sourceNames: [...files.map((f) => f.name), ...urlNames],
+    });
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
     fd.append("projectId", projectId);
     if (directives.trim()) fd.append("directives", directives.trim());
     if (urls.trim()) fd.append("urls", urls.trim());
-    const res = await fetch("/api/generate", { method: "POST", body: fd });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setErr(j.error || "생성을 시작하지 못했습니다."); setPhase("error"); return;
+    try {
+      const res = await fetch("/api/generate", { method: "POST", body: fd });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setErr(j.error || "생성을 시작하지 못했습니다."); setPhase("error"); return;
+      }
+      const s: Snapshot = await res.json();
+      setSnap(s); setJobId(s.id);
+      if (s.status === "error") { setErr(s.error || "생성 중 오류가 발생했습니다."); setPhase("error"); return; }
+      setPhase("done"); setTab("gap");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "네트워크 오류가 발생했습니다."); setPhase("error");
     }
-    const { jobId: id } = await res.json();
-    setJobId(id);
-    const es = new EventSource(`/api/jobs/${id}/stream`);
-    es.onmessage = (ev) => {
-      const s: Snapshot = JSON.parse(ev.data);
-      setSnap(s);
-      if (s.status === "done") { setPhase("done"); setTab("gap"); es.close(); }
-      else if (s.status === "error") { setErr(s.error || "생성 중 오류가 발생했습니다."); setPhase("error"); es.close(); }
-    };
-    es.onerror = () => es.close();
   }
+
+  // Ease the placeholder progress bar toward ~92% while the request is in flight.
+  useEffect(() => {
+    if (phase !== "running") return;
+    const t = setInterval(() => {
+      setSnap((s) =>
+        s && s.status === "running"
+          ? { ...s, progress: Math.min(92, Math.round(s.progress + Math.max(1, (92 - s.progress) * 0.06))) }
+          : s,
+      );
+    }, 800);
+    return () => clearInterval(t);
+  }, [phase]);
 
   function resetAll() {
     setFiles([]); setDirectives(""); setUrls("");

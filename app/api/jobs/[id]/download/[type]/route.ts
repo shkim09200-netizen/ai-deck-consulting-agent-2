@@ -1,14 +1,8 @@
 import { NextRequest } from "next/server";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { getOrLoadJob, jobFilePath, renderVariantPptx } from "@/lib/jobs";
+import { getOrLoadJob, jobFileBuffer, renderVariantBuffer } from "@/lib/jobs";
+import { DOCX_MIME, PPTX_MIME } from "@/lib/storage";
 
 export const runtime = "nodejs";
-
-const MIME: Record<string, string> = {
-  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-};
 
 const ALLOWED = ["docx", "pptx", "docx-en", "pptx-en"] as const;
 type DlType = (typeof ALLOWED)[number];
@@ -23,20 +17,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // pptx downloads may request a specific design variant (minimal/bold/editorial)
   const variant = req.nextUrl.searchParams.get("variant");
-  let filePath: string | undefined;
-  if (variant && (type === "pptx" || type === "pptx-en")) {
-    filePath = await renderVariantPptx(job, variant, type === "pptx-en" ? "en" : "ko");
-  } else {
-    filePath = jobFilePath(job, type as DlType);
-  }
-  if (!filePath) return new Response("not found", { status: 404 });
+  const out =
+    variant && (type === "pptx" || type === "pptx-en")
+      ? await renderVariantBuffer(job, variant, type === "pptx-en" ? "en" : "ko")
+      : await jobFileBuffer(job, type as DlType);
+  if (!out) return new Response("not found", { status: 404 });
 
-  const buf = await readFile(filePath);
-  const fname = path.basename(filePath);
-  return new Response(new Uint8Array(buf), {
+  return new Response(new Uint8Array(out.buffer), {
     headers: {
-      "Content-Type": MIME[type.startsWith("docx") ? "docx" : "pptx"]!,
-      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`,
+      "Content-Type": type.startsWith("docx") ? DOCX_MIME : PPTX_MIME,
+      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(out.filename)}`,
     },
   });
 }

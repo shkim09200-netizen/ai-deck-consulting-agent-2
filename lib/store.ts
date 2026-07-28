@@ -1,14 +1,15 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { storage } from "@/lib/storage";
 
 /**
  * Project + folder persistence for the SparkDeck dashboard.
  *
- * Plain JSON under `.data/store.json` — inspectable, no DB. Pinned to
- * globalThis so every API route bundle shares ONE in-memory copy (Next dev
- * gives each route its own module scope otherwise — the same trap the job
- * store hit). Writes go through to disk so folders/projects survive restarts.
+ * A single `store.json` object held in the storage adapter (Vercel Blob on
+ * serverless, local filesystem otherwise). The durable copy is the source of
+ * truth — every read reloads it, so this works across independent serverless
+ * invocations with no shared process memory. (Concurrent writers race on the
+ * whole document; fine for a small internal tool, revisit with a real DB if
+ * multiple people edit the same instant.)
  */
 export interface Folder {
   id: string;
@@ -34,28 +35,15 @@ interface StoreData {
 
 // Defaults to `<cwd>/.data`; override with DECK_DATA_DIR to use a mounted
 // volume (e.g. Railway /app/.data) so projects/folders survive redeploys.
-const DATA_ROOT = process.env.DECK_DATA_DIR
-  ? path.resolve(process.env.DECK_DATA_DIR)
-  : path.join(process.cwd(), ".data");
-const STORE_FILE = path.join(DATA_ROOT, "store.json");
-
-const g = globalThis as unknown as { __deckStore?: StoreData };
+const STORE_KEY = "store.json";
 
 async function load(): Promise<StoreData> {
-  if (g.__deckStore) return g.__deckStore;
-  try {
-    const raw = await readFile(STORE_FILE, "utf8");
-    const parsed = JSON.parse(raw) as StoreData;
-    g.__deckStore = { projects: parsed.projects ?? [], folders: parsed.folders ?? [] };
-  } catch {
-    g.__deckStore = { projects: [], folders: [] };
-  }
-  return g.__deckStore!;
+  const d = await storage.getJson<StoreData>(STORE_KEY);
+  return { projects: d?.projects ?? [], folders: d?.folders ?? [] };
 }
 
 async function persist(d: StoreData): Promise<void> {
-  await mkdir(DATA_ROOT, { recursive: true });
-  await writeFile(STORE_FILE, JSON.stringify(d, null, 2), "utf8");
+  await storage.putJson(STORE_KEY, d);
 }
 
 /* ---------------- folders ---------------- */

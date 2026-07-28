@@ -572,7 +572,7 @@ function renderSlide(pptx: PptxGenJS, sl: Slide, theme: DeckTheme, t: Labels, la
   slide.addNotes((sl.speakerNotes || "") + checklistNote + recNote + flagNote);
 }
 
-export async function writeSkeletonPptx(doc: SkeletonDoc, outPath: string, lang: Lang = "ko", styleId?: string): Promise<string> {
+function buildSkeletonPptx(doc: SkeletonDoc, lang: Lang, styleId?: string): PptxGenJS {
   const theme = resolveTheme(doc.accentColor, styleId ?? doc.variant) ?? DEFAULT_THEME;
   const t = labels(lang);
   const pptx = new PptxGenJS();
@@ -583,6 +583,16 @@ export async function writeSkeletonPptx(doc: SkeletonDoc, outPath: string, lang:
   const total = doc.slides.length;
   const brand = brandMark(doc.companyName);
   doc.slides.forEach((sl, i) => renderSlide(pptx, sl, theme, t, lang, brand, i + 1, total));
-  await pptx.writeFile({ fileName: outPath });
+  return pptx;
+}
+
+/** Render the deck to a pptx Buffer (no disk) — used on serverless. */
+export async function renderSkeletonPptxBuffer(doc: SkeletonDoc, lang: Lang = "ko", styleId?: string): Promise<Buffer> {
+  const out = await buildSkeletonPptx(doc, lang, styleId).write({ outputType: "nodebuffer" });
+  return out as Buffer;
+}
+
+export async function writeSkeletonPptx(doc: SkeletonDoc, outPath: string, lang: Lang = "ko", styleId?: string): Promise<string> {
+  await buildSkeletonPptx(doc, lang, styleId).writeFile({ fileName: outPath });
   return outPath;
 }

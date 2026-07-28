@@ -1,9 +1,6 @@
-import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
-import path from "node:path";
-import os from "node:os";
 import { randomUUID } from "node:crypto";
 
-import { parseFile, parseUrl, type ParsedSource } from "@engine/ingestion/parse.js";
+import { parseBuffer, parseUrl, type ParsedSource } from "@engine/ingestion/parse.js";
 import {
   extractCompanyInput,
   getClarifications,
@@ -12,12 +9,13 @@ import {
   generateSkeleton,
   reviewDeck,
 } from "@engine/llm/pipeline.js";
-import { writeScriptDocx } from "@engine/render/docx.js";
-import { writeSkeletonPptx } from "@engine/render/pptx.js";
+import { renderScriptDocxBuffer } from "@engine/render/docx.js";
+import { renderSkeletonPptxBuffer } from "@engine/render/pptx.js";
 import { buildTracker, type TrackerItem } from "@engine/domain/flags.js";
 import type { CompanyInput, GapAnalysis, ScriptDoc, SkeletonDoc } from "@engine/domain/types.js";
 import type { ReviewOutput } from "@engine/llm/schemas.js";
 import { recordGeneration } from "@/lib/store";
+import { storage, DOCX_MIME, PPTX_MIME } from "@/lib/storage";
 
 export type StageStatus = "pending" | "active" | "done" | "error";
 export interface Stage {
@@ -68,31 +66,24 @@ export interface Job {
   projectId?: string; // dashboard project this generation belongs to
   error?: string;
   result?: JobResult;
-  dir: string; // where uploads + outputs live
 }
 
 /**
- * In-memory job store. Pinned to globalThis so every API route bundle shares
- * ONE Map — in Next.js dev each route can otherwise get its own module scope,
- * which made freshly-compiled routes (e.g. /translate) see an empty store and
- * return 404 for jobs created by /generate.
+ * Best-effort per-instance cache. The durable copy in the storage adapter
+ * (`jobs/<id>/job.json`) is the source of truth — every cross-request read
+ * falls back to it, so the app never assumes a shared process memory (which a
+ * serverless host does not provide).
  */
 const globalStore = globalThis as unknown as { __deckJobs?: Map<string, Job> };
 const jobs: Map<string, Job> = (globalStore.__deckJobs ??= new Map<string, Job>());
 
-// Where jobs, uploads, and generated files live. Defaults to `<cwd>/.data`,
-// but can be pointed at a mounted volume via DECK_DATA_DIR (e.g. Railway's
-// /app/.data volume) so data survives redeploys regardless of cwd.
-const DATA_ROOT = process.env.DECK_DATA_DIR
-  ? path.resolve(process.env.DECK_DATA_DIR)
-  : path.join(process.cwd(), ".data");
+const jobJsonKey = (id: string) => `jobs/${id}/job.json`;
+const jobFileKey = (id: string, filename: string) => `jobs/${id}/${filename}`;
 
-const jobJsonPath = (dir: string) => path.join(dir, "job.json");
-
-/** Snapshot the job (sans functions) to disk so it survives a server restart. */
+/** Snapshot the job to durable storage so other requests can read it. */
 async function persistJob(job: Job): Promise<void> {
   try {
-    await writeFile(jobJsonPath(job.dir), JSON.stringify(job), "utf8");
+    await storage.putJson(jobJsonKey(job.id), job);
   } catch {
     /* best-effort */
   }
@@ -103,23 +94,16 @@ export function getJob(id: string): Job | undefined {
 }
 
 /**
- * Return the job from memory, or rehydrate it from `.data/<id>/job.json` if a
- * previous run persisted it (e.g. after a server restart, or when reopening a
- * saved project). Falls back to undefined if nothing is on disk.
+ * Return the job from the per-instance cache, or rehydrate it from durable
+ * storage (`jobs/<id>/job.json`). Returns undefined if nothing is stored.
  */
 export async function getOrLoadJob(id: string): Promise<Job | undefined> {
   const mem = jobs.get(id);
   if (mem) return mem;
-  const dir = path.join(DATA_ROOT, id);
-  try {
-    const raw = await readFile(jobJsonPath(dir), "utf8");
-    const job = JSON.parse(raw) as Job;
-    job.dir = dir; // path is environment-relative; always trust the current location
-    jobs.set(id, job);
-    return job;
-  } catch {
-    return undefined;
-  }
+  const job = await storage.getJson<Job>(jobJsonKey(id));
+  if (!job) return undefined;
+  jobs.set(id, job);
+  return job;
 }
 
 export function snapshot(job: Job) {
@@ -154,22 +138,19 @@ function safeName(s: string): string {
   return s.replace(/[\\/:*?"<>|]/g, "_").trim() || "company";
 }
 
-/** Create a job, persist uploaded files, and kick off the pipeline (not awaited). */
+/**
+ * Run the whole pipeline for the uploaded files and return the finished job.
+ *
+ * Synchronous by design: on serverless there is no reliable way to keep
+ * "fire-and-forget" work running after the response is sent, so generation
+ * completes within this request (bounded by the route's maxDuration) and the
+ * result is persisted to durable storage before returning.
+ */
 export async function createJob(
   files: Array<{ name: string; buffer: Buffer }>,
   opts?: { directives?: string; urls?: string[]; projectId?: string },
 ): Promise<Job> {
   const id = randomUUID();
-  const dir = path.join(DATA_ROOT, id);
-  await mkdir(dir, { recursive: true });
-
-  const savedPaths: string[] = [];
-  for (const f of files) {
-    const p = path.join(dir, safeName(f.name));
-    await writeFile(p, f.buffer);
-    savedPaths.push(p);
-  }
-
   const urls = (opts?.urls ?? []).filter((u) => /^https?:\/\//i.test(u.trim()));
   const job: Job = {
     id,
@@ -181,30 +162,31 @@ export async function createJob(
     directives: opts?.directives,
     urls,
     projectId: opts?.projectId,
-    dir,
   };
   jobs.set(id, job);
 
-  // fire and forget
-  runPipeline(job, savedPaths).catch((e) => {
+  try {
+    await runPipeline(job, files);
+  } catch (e) {
     job.status = "error";
     job.error = e instanceof Error ? e.message : String(e);
     const active = job.stages.find((s) => s.status === "active");
     if (active) active.status = "error";
     bump(job);
-  });
+    await persistJob(job);
+  }
 
   return job;
 }
 
-async function runPipeline(job: Job, filePaths: string[]) {
-  // 1) parse — files + any website URLs
+async function runPipeline(job: Job, files: Array<{ name: string; buffer: Buffer }>) {
+  // 1) parse — file buffers (no disk) + any website URLs
   setStage(job, "parse", "active");
   const sources: ParsedSource[] = [];
-  for (const p of filePaths) {
+  for (const f of files) {
     try {
-      sources.push(await parseFile(p));
-    } catch (e) {
+      sources.push(await parseBuffer(f.name, f.buffer));
+    } catch {
       /* skip unreadable file, keep going */
     }
   }
@@ -212,7 +194,7 @@ async function runPipeline(job: Job, filePaths: string[]) {
     try {
       const src = await parseUrl(u);
       if (src.text) sources.push(src);
-    } catch (e) {
+    } catch {
       /* skip unreachable url, keep going */
     }
   }
@@ -225,8 +207,7 @@ async function runPipeline(job: Job, filePaths: string[]) {
   setStage(job, "ingest", "done", `${input.companyName} · 발표 ${input.meta.presentationMinutes}분`);
 
   // 2.5–4) gap, clarify and script all depend only on `input` (script does NOT
-  // need the gap), so run them concurrently to shorten the critical path. The
-  // skeleton downstream needs script + gap, so it waits for this barrier.
+  // need the gap), so run them concurrently to shorten the critical path.
   setStage(job, "gap", "active");
   setStage(job, "clarify", "active");
   setStage(job, "script", "active");
@@ -259,9 +240,13 @@ async function runPipeline(job: Job, filePaths: string[]) {
   const name = safeName(input.companyName);
   const scriptDocx = `${name}_script_v0.1.docx`;
   const skeletonPptx = `${name}_skeleton_v0.1.pptx`;
+  const [docxBuf, pptxBuf] = await Promise.all([
+    renderScriptDocxBuffer(script, "ko"),
+    renderSkeletonPptxBuffer(skeleton, "ko", skeleton.variant),
+  ]);
   await Promise.all([
-    writeScriptDocx(script, path.join(job.dir, scriptDocx)),
-    writeSkeletonPptx(skeleton, path.join(job.dir, skeletonPptx)),
+    storage.putBinary(jobFileKey(job.id, scriptDocx), docxBuf, DOCX_MIME),
+    storage.putBinary(jobFileKey(job.id, skeletonPptx), pptxBuf, PPTX_MIME),
   ]);
   const review = await reviewP;
   setStage(job, "review", "done", `${review.items.length}개 지적 · 미해결 ${tracker.length}건`);
@@ -297,8 +282,8 @@ async function runPipeline(job: Job, filePaths: string[]) {
 
 /**
  * Persist an edited deck: recompute the unified tracker, re-render docx/pptx
- * under a new version, and point the job's download files at the newest render.
- * Pure rendering — no Claude call, so this works without an API key.
+ * under a new version to storage, and point the job's download files at the
+ * newest render. Pure rendering — no Claude call, so this works without a key.
  */
 export async function persistEditedDeck(
   job: Job,
@@ -311,8 +296,14 @@ export async function persistEditedDeck(
   const name = safeName(job.result.companyName);
   const scriptDocx = `${name}_script_v${v}.docx`;
   const skeletonPptx = `${name}_skeleton_v${v}.pptx`;
-  await writeScriptDocx(script, path.join(job.dir, scriptDocx));
-  await writeSkeletonPptx(skeleton, path.join(job.dir, skeletonPptx));
+  const [docxBuf, pptxBuf] = await Promise.all([
+    renderScriptDocxBuffer(script, "ko"),
+    renderSkeletonPptxBuffer(skeleton, "ko", skeleton.variant),
+  ]);
+  await Promise.all([
+    storage.putBinary(jobFileKey(job.id, scriptDocx), docxBuf, DOCX_MIME),
+    storage.putBinary(jobFileKey(job.id, skeletonPptx), pptxBuf, PPTX_MIME),
+  ]);
 
   job.result.script = script;
   job.result.skeleton = skeleton;
@@ -324,9 +315,9 @@ export async function persistEditedDeck(
 }
 
 /**
- * Render the English deck under a new set of files and store it on the job.
- * The translated ScriptDoc/SkeletonDoc are produced by the caller (LLM); this
- * only renders + persists them so downloads work.
+ * Render the English deck to storage under a new set of files and store it on
+ * the job. The translated docs are produced by the caller (LLM); this renders
+ * + persists them so downloads work.
  */
 export async function persistTranslatedDeck(
   job: Job,
@@ -337,8 +328,14 @@ export async function persistTranslatedDeck(
   const name = safeName(job.result.companyName);
   const scriptDocx = `${name}_script_EN.docx`;
   const skeletonPptx = `${name}_slides_EN.pptx`;
-  await writeScriptDocx(scriptEn, path.join(job.dir, scriptDocx), "en");
-  await writeSkeletonPptx(skeletonEn, path.join(job.dir, skeletonPptx), "en");
+  const [docxBuf, pptxBuf] = await Promise.all([
+    renderScriptDocxBuffer(scriptEn, "en"),
+    renderSkeletonPptxBuffer(skeletonEn, "en", skeletonEn.variant),
+  ]);
+  await Promise.all([
+    storage.putBinary(jobFileKey(job.id, scriptDocx), docxBuf, DOCX_MIME),
+    storage.putBinary(jobFileKey(job.id, skeletonPptx), pptxBuf, PPTX_MIME),
+  ]);
   job.result.en = { script: scriptEn, skeleton: skeletonEn, files: { scriptDocx, skeletonPptx } };
   bump(job);
   await persistJob(job);
@@ -346,28 +343,30 @@ export async function persistTranslatedDeck(
 }
 
 /**
- * Render (and cache) a pptx for a specific design variant on demand. One
- * skeleton → N visually distinct decks, so we don't store all N — we render the
- * requested variant fresh from the current (possibly edited) skeleton. Falls
- * back to the stored default file when no variant / an unknown one is asked.
+ * Render (on demand, no storage) a pptx buffer for a specific design variant.
+ * One skeleton → N visually distinct decks, so we render the requested variant
+ * fresh from the current (possibly edited) skeleton at download time.
  */
-export async function renderVariantPptx(
+export async function renderVariantBuffer(
   job: Job,
   variant: string,
   lang: "ko" | "en" = "ko",
-): Promise<string | undefined> {
+): Promise<{ buffer: Buffer; filename: string } | undefined> {
   if (!job.result) return undefined;
   const skeleton = lang === "en" ? job.result.en?.skeleton : job.result.skeleton;
   if (!skeleton) return undefined;
   const v = (variant || "minimal").replace(/[^a-z]/gi, "").toLowerCase() || "minimal";
   const name = safeName(job.result.companyName);
-  const fname = `${name}_slides_${v}${lang === "en" ? "_EN" : ""}.pptx`;
-  await writeSkeletonPptx(skeleton, path.join(job.dir, fname), lang, v);
-  return path.join(job.dir, fname);
+  const filename = `${name}_slides_${v}${lang === "en" ? "_EN" : ""}.pptx`;
+  const buffer = await renderSkeletonPptxBuffer(skeleton, lang, v);
+  return { buffer, filename };
 }
 
-/** Resolve the on-disk path of a produced file for download. */
-export function jobFilePath(job: Job, type: "docx" | "pptx" | "docx-en" | "pptx-en"): string | undefined {
+/** Read a produced file (from storage) for download. */
+export async function jobFileBuffer(
+  job: Job,
+  type: "docx" | "pptx" | "docx-en" | "pptx-en",
+): Promise<{ buffer: Buffer; filename: string } | undefined> {
   if (!job.result) return undefined;
   const r = job.result;
   const map: Record<string, string | undefined> = {
@@ -376,16 +375,15 @@ export function jobFilePath(job: Job, type: "docx" | "pptx" | "docx-en" | "pptx-
     "docx-en": r.en?.files.scriptDocx,
     "pptx-en": r.en?.files.skeletonPptx,
   };
-  const fname = map[type];
-  return fname ? path.join(job.dir, fname) : undefined;
+  const filename = map[type];
+  if (!filename) return undefined;
+  const buffer = await storage.getBinary(jobFileKey(job.id, filename));
+  if (!buffer) return undefined;
+  return { buffer, filename };
 }
 
-/** Best-effort cleanup (not wired to a scheduler in M2). */
-export async function deleteJob(id: string) {
-  const job = jobs.get(id);
-  if (!job) return;
+/** Drop the per-instance cache entry. Durable blobs are left to the store's
+ * lifecycle (snapshots are tiny; not wired to a scheduler in M2). */
+export function deleteJob(id: string) {
   jobs.delete(id);
-  await rm(job.dir, { recursive: true, force: true }).catch(() => {});
 }
-
-export { os };

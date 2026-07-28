@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createJob } from "@/lib/jobs";
+import { createJob, snapshot } from "@/lib/jobs";
 import { hasApiKey } from "@engine/llm/client.js";
 
 export const runtime = "nodejs";
@@ -35,8 +35,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    // Runs the full pipeline synchronously (bounded by maxDuration) and returns
+    // the finished snapshot — no fire-and-forget/SSE, which can't survive a
+    // serverless invocation. The client shows progress locally while it waits.
     const job = await createJob(files, { directives, urls, projectId });
-    return NextResponse.json({ jobId: job.id });
+    return NextResponse.json(snapshot(job));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // Most likely a read-only filesystem (e.g. serverless hosts like Vercel):

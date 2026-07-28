@@ -21,46 +21,51 @@ const IMAGE_EXT: Record<string, ParsedSource["image"] extends infer I ? I extend
   ".webp": "image/webp",
 };
 
-export async function parseFile(filePath: string): Promise<ParsedSource> {
-  const name = path.basename(filePath);
-  const ext = path.extname(filePath).toLowerCase();
+/** Parse an already-loaded file buffer. Preferred on serverless where uploads
+ * live in memory (never touch disk). `name` is used only for the extension. */
+export async function parseBuffer(name: string, buffer: Buffer): Promise<ParsedSource> {
+  const base = path.basename(name);
+  const ext = path.extname(base).toLowerCase();
 
   if (ext === ".docx") {
-    const { value } = await mammoth.extractRawText({ path: filePath });
-    return { name, kind: "other", text: value.trim() };
+    const { value } = await mammoth.extractRawText({ buffer });
+    return { name: base, kind: "other", text: value.trim() };
   }
   if (ext === ".pdf") {
-    const buf = await readFile(filePath);
-    const pdf = await getDocumentProxy(new Uint8Array(buf));
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
     const { text } = await extractText(pdf, { mergePages: true });
-    return { name, kind: "ir", text: (Array.isArray(text) ? text.join("\n") : text).trim() };
+    return { name: base, kind: "ir", text: (Array.isArray(text) ? text.join("\n") : text).trim() };
   }
   if (ext === ".xlsx" || ext === ".xls" || ext === ".csv") {
-    const wb = XLSX.readFile(filePath);
+    const wb = XLSX.read(buffer, { type: "buffer" });
     const parts: string[] = [];
     for (const sheet of wb.SheetNames) {
       parts.push(`# ${sheet}\n${XLSX.utils.sheet_to_csv(wb.Sheets[sheet]!)}`);
     }
-    return { name, kind: "spreadsheet", text: parts.join("\n\n").trim() };
+    return { name: base, kind: "spreadsheet", text: parts.join("\n\n").trim() };
   }
   if (ext in IMAGE_EXT) {
-    const buf = await readFile(filePath);
     return {
-      name,
+      name: base,
       kind: "image",
       text: "",
-      image: { base64: buf.toString("base64"), mediaType: IMAGE_EXT[ext]! },
+      image: { base64: buffer.toString("base64"), mediaType: IMAGE_EXT[ext]! },
     };
   }
   if (ext === ".pptx") {
-    const buf = await readFile(filePath);
-    return { name, kind: "prev_deck", text: (await extractPptxText(buf)).trim() };
+    return { name: base, kind: "prev_deck", text: (await extractPptxText(buffer)).trim() };
   }
   if (ext === ".txt" || ext === ".md") {
-    return { name, kind: "other", text: (await readFile(filePath, "utf-8")).trim() };
+    return { name: base, kind: "other", text: buffer.toString("utf-8").trim() };
   }
   // unknown formats: note it so the model knows a source was skipped.
-  return { name, kind: "other", text: `[미지원 형식 ${ext} — 파싱 생략]` };
+  return { name: base, kind: "other", text: `[미지원 형식 ${ext} — 파싱 생략]` };
+}
+
+/** Parse a file from disk (used by the CLI / tests). Delegates to parseBuffer. */
+export async function parseFile(filePath: string): Promise<ParsedSource> {
+  const buf = await readFile(filePath);
+  return parseBuffer(path.basename(filePath), buf);
 }
 
 /** Extract per-slide text from a .pptx (Open XML) using its zip container. */
