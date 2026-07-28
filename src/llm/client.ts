@@ -2,8 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { z } from "zod";
 
 export const MODELS = {
-  /** heavy generation */
-  generate: "claude-opus-4-8",
+  /** heavy generation. Sonnet for speed (2–3× faster than Opus); switch back to
+   *  "claude-opus-4-8" here if you want maximum quality over speed. */
+  generate: "claude-sonnet-5",
   /** lightweight extraction / review */
   light: "claude-sonnet-5",
 } as const;

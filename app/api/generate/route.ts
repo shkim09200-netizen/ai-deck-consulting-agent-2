@@ -8,7 +8,7 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   if (!hasApiKey()) {
     return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY 가 서버에 설정되지 않았습니다. .env.local 에 키를 넣고 서버를 재시작하세요." },
+      { error: "ANTHROPIC_API_KEY 가 서버에 설정되지 않았습니다. (Vercel: Settings → Environment Variables 에서 Production 에 키를 추가하고 재배포 / 로컬: .env.local)" },
       { status: 400 },
     );
   }
