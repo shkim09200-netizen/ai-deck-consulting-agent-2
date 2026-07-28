@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "AI Deck Consulting Agent — core engine (M1)",
+  "engines": {
+    "node": ">=20 <=22"
+  },
   "scripts": {
     "generate": "tsx src/cli.ts",
     "test": "vitest run",
