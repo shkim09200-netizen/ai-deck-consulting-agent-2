@@ -4,12 +4,28 @@ import { z } from "zod";
  * CompanyInput — normalized company package (§5.1)
  * ============================================================ */
 
-export const TractionSchema = z.object({
-  quantitative: z.array(z.string()).default([]), // e.g. "작년 매출 11억원", "유저 5,000명"
-  awards: z.array(z.string()).default([]),
-  partnerships: z.array(z.string()).default([]),
-  press: z.array(z.string()).default([]),
-});
+/** One traction category → string[], tolerant of a single string / null. */
+const tractionList = z
+  .preprocess((v) => (v == null ? [] : Array.isArray(v) ? v : [String(v)]), z.array(z.string().catch("")))
+  .catch([] as string[]);
+
+/**
+ * Traction. Deliberately tolerant: the model sometimes returns this whole field
+ * as a plain string (or omits sub-arrays) instead of the object — salvage what
+ * we can instead of failing the ENTIRE extraction on one field's format.
+ */
+export const TractionSchema = z
+  .preprocess(
+    (v) =>
+      v == null ? {} : typeof v === "string" ? { quantitative: [v] } : typeof v === "object" ? v : {},
+    z.object({
+      quantitative: tractionList,
+      awards: tractionList,
+      partnerships: tractionList,
+      press: tractionList,
+    }),
+  )
+  .catch({ quantitative: [], awards: [], partnerships: [], press: [] });
 export type Traction = z.infer<typeof TractionSchema>;
 
 /**
@@ -44,10 +60,11 @@ export const CompanyInputSchema = z.object({
   existingAlternatives: z.string().nullable().default(null),
   ourSolution: z.string().nullable().default(null),
   differentiators: z.string().nullable().default(null),
-  traction: TractionSchema.default({}),
+  traction: TractionSchema,
   roadmap: z.string().nullable().default(null),
   freeformNotes: z.string().nullable().default(null),
-  meta: CompanyMetaSchema.default({}),
+  // tolerant: coerce a stringified/absent meta into an object before parsing
+  meta: z.preprocess((v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {}), CompanyMetaSchema),
   /** provenance: which source assets each field was derived from */
   sources: z.array(z.string()).default([]),
 });

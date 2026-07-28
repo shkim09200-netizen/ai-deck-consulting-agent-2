@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listProjects, createProject } from "@/lib/store";
+import { listProjects, createProject, ownerFromRequest } from "@/lib/store";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  return NextResponse.json(await listProjects());
+export async function GET(req: NextRequest) {
+  return NextResponse.json(await listProjects(ownerFromRequest(req)));
 }
 
 export async function POST(req: NextRequest) {
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const name = (body.company_name ?? "").trim();
   if (!name) return NextResponse.json({ error: "회사명을 입력하세요." }, { status: 400 });
   try {
-    const project = await createProject(name, body.folder_id ?? null);
+    const project = await createProject(ownerFromRequest(req), name, body.folder_id ?? null);
     return NextResponse.json(project);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

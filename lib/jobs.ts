@@ -79,6 +79,7 @@ export interface Job {
   directives?: string;
   urls?: string[];
   projectId?: string; // dashboard project this generation belongs to
+  owner?: string; // browser workspace this job belongs to
   phase?: JobPhase;
   work?: JobWork;
   error?: string;
@@ -166,7 +167,7 @@ function safeName(s: string): string {
  */
 export async function createJob(
   files: Array<{ name: string; buffer: Buffer }>,
-  opts?: { directives?: string; urls?: string[]; projectId?: string },
+  opts?: { directives?: string; urls?: string[]; projectId?: string; owner?: string },
 ): Promise<Job> {
   const id = randomUUID();
   const urls = (opts?.urls ?? []).filter((u) => /^https?:\/\//i.test(u.trim()));
@@ -180,6 +181,7 @@ export async function createJob(
     directives: opts?.directives,
     urls,
     projectId: opts?.projectId,
+    owner: opts?.owner,
   };
   jobs.set(id, job);
 
@@ -309,7 +311,7 @@ export async function advanceJob(job: Job): Promise<Job> {
       if (job.projectId) {
         const cover = skeleton!.slides.find((s) => s.layout === "cover");
         const oneLiner = (cover?.subhead || skeleton!.slides[0]?.subhead || "").trim();
-        await recordGeneration(job.projectId, {
+        await recordGeneration(job.owner ?? "public", job.projectId, {
           jobId: job.id,
           oneLiner: oneLiner || undefined,
           companyName: input.companyName,

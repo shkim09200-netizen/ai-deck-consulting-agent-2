@@ -6,40 +6,101 @@ import os from "node:os";
  * Cross-request storage adapter.
  *
  * The app must not assume a persistent local filesystem: on serverless hosts
- * (Vercel) the filesystem is read-only and nothing written by one request is
- * visible to the next. So all durable state — the project index, job snapshots,
- * and generated docx/pptx files — goes through this adapter.
+ * (Vercel) the filesystem is read-only. All durable state — the per-user project
+ * index, job snapshots, and generated docx/pptx — goes through this adapter.
  *
- *  - When `BLOB_READ_WRITE_TOKEN` is set  → Vercel Blob (works on read-only FS).
- *  - Otherwise                            → local filesystem under
- *    `DECK_DATA_DIR` (or `<cwd>/.data`), so local dev keeps working unchanged.
+ *  - `R2_*` set               → Cloudflare R2 (S3-compatible; free tier)  ← preferred
+ *  - `BLOB_READ_WRITE_TOKEN`  → Vercel Blob
+ *  - otherwise                → local filesystem (dev), or /tmp on Vercel
  *
- * Keys are slash-delimited logical paths, e.g. `store.json`,
- * `jobs/<id>/job.json`, `jobs/<id>/<filename>.pptx`.
+ * `presignPut` returns a URL the browser can PUT a file to directly (dodging the
+ * serverless 4.5MB request-body limit); backends that can't do that return null
+ * and the client falls back to sending the file inline.
  */
 export interface Storage {
   putJson(key: string, value: unknown): Promise<void>;
   getJson<T = unknown>(key: string): Promise<T | null>;
   putBinary(key: string, data: Buffer, contentType: string): Promise<void>;
   getBinary(key: string): Promise<Buffer | null>;
+  presignPut(key: string, contentType: string): Promise<string | null>;
 }
 
-const useBlob = !!process.env.BLOB_READ_WRITE_TOKEN;
+const useR2 = !!(
+  process.env.R2_ACCOUNT_ID &&
+  process.env.R2_ACCESS_KEY_ID &&
+  process.env.R2_SECRET_ACCESS_KEY &&
+  process.env.R2_BUCKET
+);
+const useBlob = !useR2 && !!process.env.BLOB_READ_WRITE_TOKEN;
+
+/* ------------------------- Cloudflare R2 (S3 API) -------------------------- */
+function r2Storage(): Storage {
+  const bucket = process.env.R2_BUCKET!;
+  const endpoint = `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+  let clientP: Promise<import("@aws-sdk/client-s3").S3Client> | null = null;
+  const getClient = () =>
+    (clientP ??= (async () => {
+      const { S3Client } = await import("@aws-sdk/client-s3");
+      return new S3Client({
+        region: "auto",
+        endpoint,
+        credentials: {
+          accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+        },
+      });
+    })());
+
+  async function getBytes(key: string): Promise<Buffer | null> {
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    try {
+      const res = await (await getClient()).send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+      const bytes = await res.Body!.transformToByteArray();
+      return Buffer.from(bytes);
+    } catch {
+      return null;
+    }
+  }
+  async function putBytes(key: string, body: Buffer | string, contentType: string): Promise<void> {
+    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    await (await getClient()).send(
+      new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }),
+    );
+  }
+
+  return {
+    putJson: (key, value) => putBytes(key, JSON.stringify(value), "application/json; charset=utf-8"),
+    async getJson(key) {
+      const b = await getBytes(key);
+      if (!b) return null;
+      try {
+        return JSON.parse(b.toString("utf8")) as never;
+      } catch {
+        return null;
+      }
+    },
+    putBinary: (key, data, contentType) => putBytes(key, data, contentType),
+    getBinary: (key) => getBytes(key),
+    async presignPut(key, contentType) {
+      const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+      const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
+      return getSignedUrl(
+        await getClient(),
+        new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }),
+        { expiresIn: 600 },
+      );
+    },
+  };
+}
 
 /* --------------------------- Vercel Blob backend --------------------------- */
 function blobStorage(): Storage {
-  // Imported lazily so environments without the token never load the SDK.
   const sdk = () => import("@vercel/blob");
-
   async function urlFor(key: string): Promise<string | null> {
     const { list } = await sdk();
-    // `list` is the reliable way to resolve a pathname → public URL (head()
-    // expects a full URL in this SDK version).
     const { blobs } = await list({ prefix: key, limit: 1 });
-    const exact = blobs.find((b) => b.pathname === key);
-    return exact?.url ?? null;
+    return blobs.find((b) => b.pathname === key)?.url ?? null;
   }
-
   return {
     async putJson(key, value) {
       const { put } = await sdk();
@@ -54,46 +115,31 @@ function blobStorage(): Storage {
       const url = await urlFor(key);
       if (!url) return null;
       const r = await fetch(url, { cache: "no-store" });
-      if (!r.ok) return null;
-      return (await r.json()) as never;
+      return r.ok ? ((await r.json()) as never) : null;
     },
     async putBinary(key, data, contentType) {
       const { put } = await sdk();
-      await put(key, data, {
-        access: "public",
-        contentType,
-        addRandomSuffix: false,
-        allowOverwrite: true,
-      });
+      await put(key, data, { access: "public", contentType, addRandomSuffix: false, allowOverwrite: true });
     },
     async getBinary(key) {
       const url = await urlFor(key);
       if (!url) return null;
       const r = await fetch(url, { cache: "no-store" });
-      if (!r.ok) return null;
-      return Buffer.from(await r.arrayBuffer());
+      return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
+    },
+    async presignPut() {
+      return null; // Blob uses its own client upload; not wired here
     },
   };
 }
 
 /* ---------------------------- Filesystem backend --------------------------- */
 function fsStorage(): Storage {
-  // Pick a writable root. On a serverless host (Vercel) the working directory is
-  // read-only, so without an explicit dir we must use the OS temp dir (`/tmp`),
-  // which IS writable. NOTE: /tmp is per-instance and ephemeral — this keeps the
-  // app usable without Blob, but data is not durable across instances/redeploys.
-  // Connect Vercel Blob (BLOB_READ_WRITE_TOKEN) for real persistence.
   const root = process.env.DECK_DATA_DIR
     ? path.resolve(process.env.DECK_DATA_DIR)
     : process.env.VERCEL
       ? path.join(os.tmpdir(), "deck-data")
       : path.join(process.cwd(), ".data");
-  if (process.env.VERCEL) {
-    console.warn(
-      "[storage] BLOB_READ_WRITE_TOKEN not set — using ephemeral /tmp. " +
-        "Connect a Vercel Blob store for durable projects/results.",
-    );
-  }
   const full = (key: string) => path.join(root, key);
   const ensureDir = (p: string) => mkdir(path.dirname(p), { recursive: true });
 
@@ -122,10 +168,13 @@ function fsStorage(): Storage {
         return null;
       }
     },
+    async presignPut() {
+      return null; // no direct upload locally; the client sends files inline
+    },
   };
 }
 
-export const storage: Storage = useBlob ? blobStorage() : fsStorage();
+export const storage: Storage = useR2 ? r2Storage() : useBlob ? blobStorage() : fsStorage();
 
 export const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

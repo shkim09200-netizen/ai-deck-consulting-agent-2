@@ -31,6 +31,15 @@ const TABS: Array<{ key: View; label: string }> = [
 ];
 
 export default function App() {
+  // Give this browser an anonymous workspace id (once, before any child fetch)
+  // so every API request carries the deck_uid cookie and data is scoped to this
+  // browser — each visitor sees only their own projects, no login needed.
+  useState(() => {
+    if (typeof document !== "undefined" && !/(^|;\s*)deck_uid=/.test(document.cookie)) {
+      document.cookie = `deck_uid=${crypto.randomUUID()}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+    return null;
+  });
   const [entered, setEntered] = useState(false);
   const [view, setView] = useState<View>("projects");
   const [projectId, setProjectId] = useState<string | null>(null);

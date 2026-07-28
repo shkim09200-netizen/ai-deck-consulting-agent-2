@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { upload } from "@vercel/blob/client";
 import SlideCanvas, { SlideChecklist } from "./slide/SlideCanvas";
 import VariantPicker from "./slide/VariantPicker";
 import GapReport from "./GapReport";
@@ -137,17 +136,28 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
       sourceNames: [...files.map((f) => f.name), ...urlNames],
     });
     try {
-      // Large files (>4MB) are uploaded straight to Blob so they bypass the
-      // serverless 4.5MB request-body limit; only their URL is sent to the API.
-      // Small files ride along inline. (Blob path needs BLOB_READ_WRITE_TOKEN.)
+      // Large files (>4MB) are uploaded straight to object storage (R2) via a
+      // presigned URL so they bypass the serverless 4.5MB request-body limit;
+      // only the storage key is sent to the API. Small files ride along inline.
       const fd = new FormData();
-      const blobRefs: Array<{ name: string; url: string }> = [];
+      const uploadRefs: Array<{ name: string; key: string }> = [];
       const BIG = 4 * 1024 * 1024;
       for (const f of files) {
         if (f.size >= BIG) {
           try {
-            const { url } = await upload(f.name, f, { access: "public", handleUploadUrl: "/api/blob/upload" });
-            blobRefs.push({ name: f.name, url });
+            const ct = f.type || "application/octet-stream";
+            const { key, url } = await fetch("/api/upload-url", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ filename: f.name, contentType: ct }),
+            }).then((r) => r.json());
+            if (url) {
+              const put = await fetch(url, { method: "PUT", body: f, headers: { "Content-Type": ct } });
+              if (!put.ok) throw new Error("upload failed");
+              uploadRefs.push({ name: f.name, key });
+            } else {
+              fd.append("files", f); // no object storage configured → send inline
+            }
           } catch {
             fd.append("files", f); // fallback: send inline (may exceed the limit)
           }
@@ -155,7 +165,7 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
           fd.append("files", f);
         }
       }
-      if (blobRefs.length) fd.append("blobRefs", JSON.stringify(blobRefs));
+      if (uploadRefs.length) fd.append("uploadRefs", JSON.stringify(uploadRefs));
       fd.append("projectId", projectId);
       if (directives.trim()) fd.append("directives", directives.trim());
       if (urls.trim()) fd.append("urls", urls.trim());

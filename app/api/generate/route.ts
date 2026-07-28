@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createJob, snapshot } from "@/lib/jobs";
+import { ownerFromRequest } from "@/lib/store";
+import { storage } from "@/lib/storage";
 import { hasApiKey } from "@engine/llm/client.js";
 
 export const runtime = "nodejs";
@@ -23,22 +25,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Large files are uploaded to Blob by the browser (to dodge the 4.5MB request
-  // limit) and referenced here by URL — fetch them into buffers server-side.
-  const blobRefsRaw = form.get("blobRefs");
-  if (typeof blobRefsRaw === "string" && blobRefsRaw.trim()) {
+  // Large files were uploaded straight to object storage (to dodge the 4.5MB
+  // request limit) and referenced here by key — read them back into buffers.
+  const uploadRefsRaw = form.get("uploadRefs");
+  if (typeof uploadRefsRaw === "string" && uploadRefsRaw.trim()) {
     try {
-      const refs = JSON.parse(blobRefsRaw) as Array<{ name: string; url: string }>;
+      const refs = JSON.parse(uploadRefsRaw) as Array<{ name: string; key: string }>;
       for (const r of refs) {
-        try {
-          const resp = await fetch(r.url);
-          if (resp.ok) files.push({ name: r.name, buffer: Buffer.from(await resp.arrayBuffer()) });
-        } catch {
-          /* skip a blob we can't fetch, keep going */
-        }
+        const buf = await storage.getBinary(r.key);
+        if (buf) files.push({ name: r.name, buffer: buf });
       }
     } catch {
-      /* malformed blobRefs — ignore */
+      /* malformed uploadRefs — ignore */
     }
   }
 
@@ -57,7 +55,7 @@ export async function POST(req: NextRequest) {
     // Runs the full pipeline synchronously (bounded by maxDuration) and returns
     // the finished snapshot — no fire-and-forget/SSE, which can't survive a
     // serverless invocation. The client shows progress locally while it waits.
-    const job = await createJob(files, { directives, urls, projectId });
+    const job = await createJob(files, { directives, urls, projectId, owner: ownerFromRequest(req) });
     return NextResponse.json(snapshot(job));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

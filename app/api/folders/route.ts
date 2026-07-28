@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listFolders, createFolder } from "@/lib/store";
+import { listFolders, createFolder, ownerFromRequest } from "@/lib/store";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  return NextResponse.json(await listFolders());
+export async function GET(req: NextRequest) {
+  return NextResponse.json(await listFolders(ownerFromRequest(req)));
 }
 
 export async function POST(req: NextRequest) {
@@ -16,6 +16,6 @@ export async function POST(req: NextRequest) {
   }
   const name = (body.name ?? "").trim();
   if (!name) return NextResponse.json({ error: "폴더 이름을 입력하세요." }, { status: 400 });
-  const folder = await createFolder(name);
+  const folder = await createFolder(ownerFromRequest(req), name);
   return NextResponse.json(folder);
 }
