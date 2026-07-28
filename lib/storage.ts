@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 
 /**
  * Cross-request storage adapter.
@@ -77,9 +78,22 @@ function blobStorage(): Storage {
 
 /* ---------------------------- Filesystem backend --------------------------- */
 function fsStorage(): Storage {
+  // Pick a writable root. On a serverless host (Vercel) the working directory is
+  // read-only, so without an explicit dir we must use the OS temp dir (`/tmp`),
+  // which IS writable. NOTE: /tmp is per-instance and ephemeral — this keeps the
+  // app usable without Blob, but data is not durable across instances/redeploys.
+  // Connect Vercel Blob (BLOB_READ_WRITE_TOKEN) for real persistence.
   const root = process.env.DECK_DATA_DIR
     ? path.resolve(process.env.DECK_DATA_DIR)
-    : path.join(process.cwd(), ".data");
+    : process.env.VERCEL
+      ? path.join(os.tmpdir(), "deck-data")
+      : path.join(process.cwd(), ".data");
+  if (process.env.VERCEL) {
+    console.warn(
+      "[storage] BLOB_READ_WRITE_TOKEN not set — using ephemeral /tmp. " +
+        "Connect a Vercel Blob store for durable projects/results.",
+    );
+  }
   const full = (key: string) => path.join(root, key);
   const ensureDir = (p: string) => mkdir(path.dirname(p), { recursive: true });
 
