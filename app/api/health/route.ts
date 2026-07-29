@@ -12,7 +12,7 @@ export const runtime = "nodejs";
  */
 export async function GET() {
   return NextResponse.json({
-    version: "2026-07-29-bigfile-2",
+    version: "2026-07-29-blob-oidc",
     storageProvider, // "r2" | "blob" | "fs" (fs = no object storage → big files & persistence won't work)
     hasApiKey: hasApiKey(),
     bigFileUpload: storageProvider !== "fs",

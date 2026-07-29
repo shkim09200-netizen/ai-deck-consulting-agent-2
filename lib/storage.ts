@@ -31,7 +31,10 @@ const useR2 = !!(
   process.env.R2_SECRET_ACCESS_KEY &&
   process.env.R2_BUCKET
 );
-const useBlob = !useR2 && !!process.env.BLOB_READ_WRITE_TOKEN;
+// Enable Blob when either the classic read-write token OR the newer store-id is
+// present. New Vercel Blob stores (Private) auth via BLOB_STORE_ID + runtime
+// OIDC (VERCEL_OIDC_TOKEN) instead of a static BLOB_READ_WRITE_TOKEN.
+const useBlob = !useR2 && !!(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 
 /* ------------------------- Cloudflare R2 (S3 API) -------------------------- */
 function r2Storage(): Storage {
@@ -94,41 +97,50 @@ function r2Storage(): Storage {
 }
 
 /* --------------------------- Vercel Blob backend --------------------------- */
+// Private access + get() reads: works with both new (OIDC/private) and classic
+// stores, and keeps client decks non-public. get(key) is a direct read (no list
+// eventual-consistency), and OIDC auth is automatic on Vercel at runtime.
 function blobStorage(): Storage {
   const sdk = () => import("@vercel/blob");
-  async function urlFor(key: string): Promise<string | null> {
-    const { list } = await sdk();
-    const { blobs } = await list({ prefix: key, limit: 1 });
-    return blobs.find((b) => b.pathname === key)?.url ?? null;
+  const ACCESS = "private" as const;
+
+  async function readKey(key: string): Promise<Buffer | null> {
+    const { get } = await sdk();
+    try {
+      const res = await get(key, { access: ACCESS });
+      if (!res || res.statusCode !== 200 || !res.stream) return null;
+      return Buffer.from(await new Response(res.stream).arrayBuffer());
+    } catch {
+      return null;
+    }
   }
+
   return {
     async putJson(key, value) {
       const { put } = await sdk();
       await put(key, JSON.stringify(value), {
-        access: "public",
+        access: ACCESS,
         contentType: "application/json; charset=utf-8",
         addRandomSuffix: false,
         allowOverwrite: true,
       });
     },
     async getJson(key) {
-      const url = await urlFor(key);
-      if (!url) return null;
-      const r = await fetch(url, { cache: "no-store" });
-      return r.ok ? ((await r.json()) as never) : null;
+      const buf = await readKey(key);
+      if (!buf) return null;
+      try {
+        return JSON.parse(buf.toString("utf8")) as never;
+      } catch {
+        return null;
+      }
     },
     async putBinary(key, data, contentType) {
       const { put } = await sdk();
-      await put(key, data, { access: "public", contentType, addRandomSuffix: false, allowOverwrite: true });
+      await put(key, data, { access: ACCESS, contentType, addRandomSuffix: false, allowOverwrite: true });
     },
-    async getBinary(key) {
-      const url = await urlFor(key);
-      if (!url) return null;
-      const r = await fetch(url, { cache: "no-store" });
-      return r.ok ? Buffer.from(await r.arrayBuffer()) : null;
-    },
+    getBinary: (key) => readKey(key),
     async presignPut() {
-      return null; // Blob uses its own client upload; not wired here
+      return null; // Blob uses its own client upload (handleUpload); not presigned
     },
   };
 }

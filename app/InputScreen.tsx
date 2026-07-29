@@ -162,8 +162,8 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
             if (!put.ok) throw new Error(`R2 PUT ${put.status}`);
             uploadRefs.push({ name: f.name, key: info.key });
           } else if (info.provider === "blob") {
-            const res = await upload(info.key, f, { access: "public", handleUploadUrl: "/api/blob/upload" });
-            uploadRefs.push({ name: f.name, key: info.key, url: res.url });
+            await upload(info.key, f, { access: "private", handleUploadUrl: "/api/blob/upload" });
+            uploadRefs.push({ name: f.name, key: info.key }); // server reads via get(key)
           } else {
             bigFileError = `"${f.name}" (${(f.size / 1024 / 1024).toFixed(1)}MB)은 4.5MB를 넘어 저장소 업로드가 필요합니다. 서버에 저장소(Blob/R2)가 연결돼 있지 않거나 재배포가 안 됐습니다. (/api/health 로 확인)`;
             break;
