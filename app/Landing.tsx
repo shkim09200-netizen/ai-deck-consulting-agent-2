@@ -19,21 +19,6 @@ export default function Landing({ onStart }: { onStart: () => void }) {
         <button className="rainbow landing-cta" onClick={onStart}>
           시작하기 →
         </button>
-
-        <div className="landing-points">
-          <div>
-            <span className="lp-dot" style={{ background: "#ff5a5f" }} />
-            기존 덱 진단 → 빠진 요소·순서 보완
-          </div>
-          <div>
-            <span className="lp-dot" style={{ background: "#35c759" }} />
-            대본 · 슬라이드 실시간 미리보기
-          </div>
-          <div>
-            <span className="lp-dot" style={{ background: "#2f9bff" }} />
-            채팅·직접 편집으로 구조까지 수정
-          </div>
-        </div>
       </div>
       <div className="landing-foot">by SparkLabs</div>
     </div>

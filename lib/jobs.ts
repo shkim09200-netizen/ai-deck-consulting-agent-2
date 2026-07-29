@@ -8,6 +8,7 @@ import {
   generateScript,
   generateSkeleton,
   reviewDeck,
+  alignScriptToSlides,
 } from "@engine/llm/pipeline.js";
 import { renderScriptDocxBuffer } from "@engine/render/docx.js";
 import { renderSkeletonPptxBuffer } from "@engine/render/pptx.js";
@@ -295,13 +296,16 @@ export async function advanceJob(job: Job): Promise<Job> {
       const { input, script, skeleton, gap, clarifications } = job.work;
       setStage(job, "review", "active");
       const review = await reviewDeck(script!, skeleton!);
-      const tracker = buildTracker(script!, skeleton!);
+      // Re-align the script to the finished slides: one numbered entry per slide
+      // (from its speakerNotes), so script count == slide count and no (click).
+      const alignedScript = alignScriptToSlides(skeleton!, input.companyName, input.meta.presentationMinutes);
+      const tracker = buildTracker(alignedScript, skeleton!);
 
       const name = safeName(input.companyName);
       const scriptDocx = `${name}_script_v0.1.docx`;
       const skeletonPptx = `${name}_skeleton_v0.1.pptx`;
       const [docxBuf, pptxBuf] = await Promise.all([
-        renderScriptDocxBuffer(script!, "ko"),
+        renderScriptDocxBuffer(alignedScript, "ko"),
         renderSkeletonPptxBuffer(skeleton!, "ko", skeleton!.variant),
       ]);
       await Promise.all([
@@ -316,7 +320,7 @@ export async function advanceJob(job: Job): Promise<Job> {
         input,
         clarifications: clarifications ?? [],
         gap: gap!,
-        script: script!,
+        script: alignedScript,
         skeleton: skeleton!,
         review: review.items,
         tracker,

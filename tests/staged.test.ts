@@ -18,6 +18,13 @@ vi.mock("@engine/llm/pipeline.js", () => ({
   generateSkeleton: vi.fn(async () =>
     ({ companyName: "테스트컴퍼니", presentationMinutes: 7, variant: "minimal", slides: [], flags: [] }) as any),
   reviewDeck: vi.fn(async () => ({ items: [] }) as any),
+  alignScriptToSlides: (skeleton: any, companyName: string, presentationMinutes: number) =>
+    ({
+      companyName,
+      presentationMinutes,
+      sections: (skeleton.slides ?? []).map((sl: any) => ({ no: sl.no, key: sl.sectionKey, title: sl.headline ?? "", beats: [] })),
+      flags: [],
+    }) as any,
 }));
 vi.mock("@engine/render/docx.js", () => ({ renderScriptDocxBuffer: vi.fn(async () => Buffer.from("DOCX")) }));
 vi.mock("@engine/render/pptx.js", () => ({ renderSkeletonPptxBuffer: vi.fn(async () => Buffer.from("PPTX")) }));

@@ -165,6 +165,24 @@ export function finalizeScript(
   return { companyName, presentationMinutes, sections, flags };
 }
 
+/**
+ * Re-key the script to the finished slides so the two match 1:1: one numbered
+ * entry per slide (using that slide's speakerNotes), instead of section blocks
+ * split by ambiguous `(click)` marks. The numbers in the script == slide numbers.
+ */
+export function alignScriptToSlides(skeleton: SkeletonDoc, companyName: string, presentationMinutes: number): ScriptDoc {
+  const sections = skeleton.slides.map((sl) => ({
+    no: sl.no,
+    key: sl.sectionKey,
+    title: (sl.eyebrow || sl.headline || sl.sectionKey || `Slide ${sl.no}`).trim(),
+    beats: sl.speakerNotes?.trim() ? [{ text: sl.speakerNotes.trim(), click: false }] : [],
+  }));
+  const flags: Flag[] = sections.flatMap((s) =>
+    s.beats.flatMap((b) => extractConfirmFlags(b.text, `슬라이드 ${s.no} (${s.title})`)),
+  );
+  return { companyName, presentationMinutes, sections, flags };
+}
+
 /* ---------- Step 2: Skeleton (§4.2) — only after Script approval ---------- */
 
 export async function generateSkeleton(

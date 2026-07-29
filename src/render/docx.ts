@@ -40,7 +40,7 @@ export function buildScriptDocument(doc: ScriptDoc, lang: "ko" | "en" = "ko"): D
     children.push(
       new Paragraph({
         heading: HeadingLevel.HEADING_2,
-        children: [new TextRun({ text: `§${s.no}  (${s.title})`, bold: true, size: PT(13) })],
+        children: [new TextRun({ text: `슬라이드 ${s.no} — ${s.title}`, bold: true, size: PT(13) })],
       }),
     );
     for (const b of s.beats) {

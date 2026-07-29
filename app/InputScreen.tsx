@@ -439,8 +439,7 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
               <div className="summary">
                 <span className="name">{result.companyName}</span>
                 <span className="pill">발표 {result.presentationMinutes}분</span>
-                <span className="pill">{activeScript.sections.length} 섹션</span>
-                <span className="pill">{activeSkeleton.slides.length} 슬라이드</span>
+                <span className="pill">대본 {activeScript.sections.length} · 슬라이드 {activeSkeleton.slides.length}</span>
               </div>
 
               <div className="langbar">
@@ -516,11 +515,10 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
                 <div>
                   {activeScript.sections.map((s) => (
                     <div className="section" key={s.no}>
-                      <div className="stitle"><span className="no">§{s.no}</span>({s.title})</div>
+                      <div className="stitle"><span className="no">슬라이드 {s.no}</span>· {s.title}</div>
                       {s.beats.map((b, i) => (
                         <div className="beat" key={i}>
                           <ConfirmText text={b.text} />
-                          {b.click && <span className="click"> (click)</span>}
                         </div>
                       ))}
                     </div>
