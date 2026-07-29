@@ -143,31 +143,40 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
       const fd = new FormData();
       const uploadRefs: Array<{ name: string; key: string; url?: string }> = [];
       const BIG = 4 * 1024 * 1024;
+      let bigFileError: string | null = null;
       for (const f of files) {
-        if (f.size >= BIG) {
-          try {
-            const ct = f.type || "application/octet-stream";
-            const info = await fetch("/api/upload-url", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ filename: f.name, contentType: ct }),
-            }).then((r) => r.json());
-            if (info.provider === "r2" && info.url) {
-              const put = await fetch(info.url, { method: "PUT", body: f, headers: { "Content-Type": ct } });
-              if (!put.ok) throw new Error("upload failed");
-              uploadRefs.push({ name: f.name, key: info.key });
-            } else if (info.provider === "blob") {
-              const res = await upload(info.key, f, { access: "public", handleUploadUrl: "/api/blob/upload" });
-              uploadRefs.push({ name: f.name, key: info.key, url: res.url });
-            } else {
-              fd.append("files", f); // no object storage configured → send inline
-            }
-          } catch {
-            fd.append("files", f); // fallback: send inline (may exceed the limit)
-          }
-        } else {
+        if (f.size < BIG) {
           fd.append("files", f);
+          continue;
         }
+        // >4MB: must go to object storage (bypassing the 4.5MB request limit)
+        try {
+          const ct = f.type || "application/octet-stream";
+          const info = await fetch("/api/upload-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename: f.name, contentType: ct }),
+          }).then((r) => r.json());
+          if (info.provider === "r2" && info.url) {
+            const put = await fetch(info.url, { method: "PUT", body: f, headers: { "Content-Type": ct } });
+            if (!put.ok) throw new Error(`R2 PUT ${put.status}`);
+            uploadRefs.push({ name: f.name, key: info.key });
+          } else if (info.provider === "blob") {
+            const res = await upload(info.key, f, { access: "public", handleUploadUrl: "/api/blob/upload" });
+            uploadRefs.push({ name: f.name, key: info.key, url: res.url });
+          } else {
+            bigFileError = `"${f.name}" (${(f.size / 1024 / 1024).toFixed(1)}MB)은 4.5MB를 넘어 저장소 업로드가 필요합니다. 서버에 저장소(Blob/R2)가 연결돼 있지 않거나 재배포가 안 됐습니다. (/api/health 로 확인)`;
+            break;
+          }
+        } catch (e) {
+          bigFileError = `"${f.name}" 업로드 실패: ${e instanceof Error ? e.message : String(e)}`;
+          break;
+        }
+      }
+      if (bigFileError) {
+        setErr(bigFileError);
+        setPhase("error");
+        return;
       }
       if (uploadRefs.length) fd.append("uploadRefs", JSON.stringify(uploadRefs));
       fd.append("projectId", projectId);
