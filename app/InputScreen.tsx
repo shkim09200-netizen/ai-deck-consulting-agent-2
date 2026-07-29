@@ -29,6 +29,19 @@ const STAGE_LABELS = [
   "AI Review + 통합 트래커",
 ];
 
+/**
+ * Extract text from a PDF in the browser (unpdf bundles pdf.js). Lets a large
+ * deck be "compressed" client-side — we send just the text the model reads,
+ * so it never hits Vercel's 4.5MB request limit and needs no object storage.
+ */
+async function pdfToText(file: File): Promise<string> {
+  const { getDocumentProxy, extractText } = await import("unpdf");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const pdf = await getDocumentProxy(bytes);
+  const { text } = await extractText(pdf, { mergePages: true });
+  return (Array.isArray(text) ? text.join("\n") : text).trim();
+}
+
 function ConfirmText({ text }: { text: string }) {
   const parts = text.split(/(\[CONFIRM:[^\]]*\])/g);
   return (
@@ -148,7 +161,23 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
           fd.append("files", f);
           continue;
         }
-        // >4MB: must go to object storage (bypassing the 4.5MB request limit)
+        // Big file (>4MB): can't ride in the request body (Vercel's 4.5MB limit).
+        const isPdf = f.name.toLowerCase().endsWith(".pdf") || f.type === "application/pdf";
+        if (isPdf) {
+          // Auto-compress in the browser: extract the text (everything the model
+          // reads from a PDF) and send THAT — tiny, lossless for the model, no
+          // object storage, no 4.5MB problem.
+          try {
+            const text = await pdfToText(f);
+            if (!text) throw new Error("텍스트를 추출하지 못했습니다 (이미지 스캔 PDF일 수 있음)");
+            fd.append("files", new File([text], f.name.replace(/\.pdf$/i, "") + ".txt", { type: "text/plain" }));
+          } catch (e) {
+            bigFileError = `"${f.name}" 브라우저 텍스트 추출 실패: ${e instanceof Error ? e.message : String(e)}`;
+            break;
+          }
+          continue;
+        }
+        // Big non-PDF: needs object storage (presigned upload) if configured.
         try {
           const ct = f.type || "application/octet-stream";
           const info = await fetch("/api/upload-url", {
@@ -157,12 +186,11 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
             body: JSON.stringify({ filename: f.name, contentType: ct }),
           }).then((r) => r.json());
           if (info.url) {
-            // presigned PUT — works for both R2 and Blob (OIDC). Server reads by key.
             const put = await fetch(info.url, { method: "PUT", body: f, headers: { "Content-Type": ct } });
             if (!put.ok) throw new Error(`업로드 실패 (${put.status})`);
             uploadRefs.push({ name: f.name, key: info.key });
           } else {
-            bigFileError = `"${f.name}" (${(f.size / 1024 / 1024).toFixed(1)}MB)은 4.5MB를 넘어 저장소 업로드가 필요합니다. 서버에 저장소(Blob/R2)가 연결돼 있지 않거나 재배포가 안 됐습니다. (/api/health 로 확인)`;
+            bigFileError = `"${f.name}" (${(f.size / 1024 / 1024).toFixed(1)}MB)은 4.5MB를 넘습니다. PDF로 올리면 브라우저에서 자동 처리됩니다 (그 외 형식은 저장소 연결 필요).`;
             break;
           }
         } catch (e) {
@@ -258,6 +286,7 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
             >
               <div className="big">파일을 끌어다 놓거나 클릭</div>
               <small>IR Deck · 이전 덱(PPTX) · 원페이저 · IR 자료 · 이미지 — 그냥 다 넣으세요 (PDF, DOCX, PPTX, XLSX, 이미지, TXT)</small>
+              <small className="muted">4.5MB 넘는 큰 PDF는 업로드 전 브라우저에서 자동으로 텍스트만 추출해 보냅니다 (모델이 보는 품질 손실 없음).</small>
               <input
                 ref={inputRef} type="file" multiple hidden
                 onChange={(e) => addFiles(e.target.files)}
