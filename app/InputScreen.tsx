@@ -30,16 +30,86 @@ const STAGE_LABELS = [
 ];
 
 /**
- * Extract text from a PDF in the browser (unpdf bundles pdf.js). Lets a large
- * deck be "compressed" client-side — we send just the text the model reads,
- * so it never hits Vercel's 4.5MB request limit and needs no object storage.
+ * Extract text from a document IN THE BROWSER, so a large deck is "compressed"
+ * client-side to just the text the model reads — never hitting Vercel's 4.5MB
+ * request limit and needing no object storage. Handles PDF / PPTX / DOCX / XLSX.
+ * Returns null for formats we can't text-extract (e.g. images) → those fall back
+ * to object-storage upload. All libs are dynamically imported (code-split).
  */
-async function pdfToText(file: File): Promise<string> {
-  const { getDocumentProxy, extractText } = await import("unpdf");
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const pdf = await getDocumentProxy(bytes);
-  const { text } = await extractText(pdf, { mergePages: true });
-  return (Array.isArray(text) ? text.join("\n") : text).trim();
+async function extractTextClient(file: File): Promise<string | null> {
+  const name = file.name.toLowerCase();
+  const buf = await file.arrayBuffer();
+
+  if (name.endsWith(".pdf") || file.type === "application/pdf") {
+    const { getDocumentProxy, extractText } = await import("unpdf");
+    const pdf = await getDocumentProxy(new Uint8Array(buf));
+    const { text } = await extractText(pdf, { mergePages: true });
+    return (Array.isArray(text) ? text.join("\n") : text).trim();
+  }
+
+  if (name.endsWith(".pptx")) {
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(buf);
+    const slideFiles = Object.keys(zip.files)
+      .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a, b) => Number(a.match(/slide(\d+)\.xml$/)![1]) - Number(b.match(/slide(\d+)\.xml$/)![1]));
+    const out: string[] = [];
+    for (let i = 0; i < slideFiles.length; i++) {
+      const xml = await zip.files[slideFiles[i]!]!.async("string");
+      const runs = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((m) =>
+        m[1]!.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'"),
+      );
+      const text = runs.join(" ").replace(/\s+/g, " ").trim();
+      if (text) out.push(`# Slide ${i + 1}\n${text}`);
+    }
+    return out.join("\n\n").trim();
+  }
+
+  if (name.endsWith(".docx")) {
+    const mammoth = (await import("mammoth")).default;
+    const { value } = await mammoth.extractRawText({ arrayBuffer: buf });
+    return value.trim();
+  }
+
+  if (name.endsWith(".xlsx") || name.endsWith(".xls") || name.endsWith(".csv")) {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+    const parts: string[] = [];
+    for (const sheet of wb.SheetNames) parts.push(`# ${sheet}\n${XLSX.utils.sheet_to_csv(wb.Sheets[sheet]!)}`);
+    return parts.join("\n\n").trim();
+  }
+
+  if (name.endsWith(".txt") || name.endsWith(".md")) {
+    return new TextDecoder().decode(buf).trim();
+  }
+
+  return null; // images are handled separately (compressImage); else → storage
+}
+
+/**
+ * Shrink a large image in the browser (downscale + re-encode) so it fits under
+ * the 4.5MB request limit while staying usable for the model's vision.
+ */
+async function compressImage(file: File): Promise<File> {
+  const MAX_DIM = 2000;
+  const MAX_BYTES = 3.8 * 1024 * 1024;
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, w, h);
+  const toBlob = (q: number) =>
+    new Promise<Blob>((res) => canvas.toBlob((b) => res(b!), "image/jpeg", q));
+  let quality = 0.85;
+  let blob = await toBlob(quality);
+  while (blob.size > MAX_BYTES && quality > 0.3) {
+    quality -= 0.15;
+    blob = await toBlob(quality);
+  }
+  return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
 }
 
 function ConfirmText({ text }: { text: string }) {
@@ -161,23 +231,25 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
           fd.append("files", f);
           continue;
         }
-        // Big file (>4MB): can't ride in the request body (Vercel's 4.5MB limit).
-        const isPdf = f.name.toLowerCase().endsWith(".pdf") || f.type === "application/pdf";
-        if (isPdf) {
-          // Auto-compress in the browser: extract the text (everything the model
-          // reads from a PDF) and send THAT — tiny, lossless for the model, no
-          // object storage, no 4.5MB problem.
-          try {
-            const text = await pdfToText(f);
-            if (!text) throw new Error("텍스트를 추출하지 못했습니다 (이미지 스캔 PDF일 수 있음)");
-            fd.append("files", new File([text], f.name.replace(/\.pdf$/i, "") + ".txt", { type: "text/plain" }));
-          } catch (e) {
-            bigFileError = `"${f.name}" 브라우저 텍스트 추출 실패: ${e instanceof Error ? e.message : String(e)}`;
-            break;
+        // Big file (>4MB): browser-process it to fit under Vercel's 4.5MB limit
+        // (no object storage). Images → downscale; documents → extract text.
+        try {
+          const isImage = /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp)$/i.test(f.name);
+          if (isImage) {
+            fd.append("files", await compressImage(f));
+            continue;
           }
-          continue;
+          const text = await extractTextClient(f);
+          if (text !== null) {
+            if (!text) throw new Error("텍스트를 추출하지 못했습니다 (이미지 스캔 문서일 수 있음)");
+            fd.append("files", new File([text], f.name.replace(/\.[^.]+$/, "") + ".txt", { type: "text/plain" }));
+            continue;
+          }
+        } catch (e) {
+          bigFileError = `"${f.name}" 브라우저 처리 실패: ${e instanceof Error ? e.message : String(e)}`;
+          break;
         }
-        // Big non-PDF: needs object storage (presigned upload) if configured.
+        // Not text-extractable (e.g. a large image) → needs object storage.
         try {
           const ct = f.type || "application/octet-stream";
           const info = await fetch("/api/upload-url", {
@@ -190,7 +262,7 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
             if (!put.ok) throw new Error(`업로드 실패 (${put.status})`);
             uploadRefs.push({ name: f.name, key: info.key });
           } else {
-            bigFileError = `"${f.name}" (${(f.size / 1024 / 1024).toFixed(1)}MB)은 4.5MB를 넘습니다. PDF로 올리면 브라우저에서 자동 처리됩니다 (그 외 형식은 저장소 연결 필요).`;
+            bigFileError = `"${f.name}" (${(f.size / 1024 / 1024).toFixed(1)}MB)은 4.5MB를 넘고 텍스트 추출이 안 되는 형식입니다 (큰 이미지 등). 저장소 연결이 필요합니다.`;
             break;
           }
         } catch (e) {
@@ -286,7 +358,6 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
             >
               <div className="big">파일을 끌어다 놓거나 클릭</div>
               <small>IR Deck · 이전 덱(PPTX) · 원페이저 · IR 자료 · 이미지 — 그냥 다 넣으세요 (PDF, DOCX, PPTX, XLSX, 이미지, TXT)</small>
-              <small className="muted">4.5MB 넘는 큰 PDF는 업로드 전 브라우저에서 자동으로 텍스트만 추출해 보냅니다 (모델이 보는 품질 손실 없음).</small>
               <input
                 ref={inputRef} type="file" multiple hidden
                 onChange={(e) => addFiles(e.target.files)}
