@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { upload } from "@vercel/blob/client";
 import SlideCanvas, { SlideChecklist } from "./slide/SlideCanvas";
 import VariantPicker from "./slide/VariantPicker";
 import GapReport from "./GapReport";
@@ -157,13 +156,11 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ filename: f.name, contentType: ct }),
           }).then((r) => r.json());
-          if (info.provider === "r2" && info.url) {
+          if (info.url) {
+            // presigned PUT — works for both R2 and Blob (OIDC). Server reads by key.
             const put = await fetch(info.url, { method: "PUT", body: f, headers: { "Content-Type": ct } });
-            if (!put.ok) throw new Error(`R2 PUT ${put.status}`);
+            if (!put.ok) throw new Error(`업로드 실패 (${put.status})`);
             uploadRefs.push({ name: f.name, key: info.key });
-          } else if (info.provider === "blob") {
-            await upload(info.key, f, { access: "private", handleUploadUrl: "/api/blob/upload" });
-            uploadRefs.push({ name: f.name, key: info.key }); // server reads via get(key)
           } else {
             bigFileError = `"${f.name}" (${(f.size / 1024 / 1024).toFixed(1)}MB)은 4.5MB를 넘어 저장소 업로드가 필요합니다. 서버에 저장소(Blob/R2)가 연결돼 있지 않거나 재배포가 안 됐습니다. (/api/health 로 확인)`;
             break;

@@ -139,8 +139,26 @@ function blobStorage(): Storage {
       await put(key, data, { access: ACCESS, contentType, addRandomSuffix: false, allowOverwrite: true });
     },
     getBinary: (key) => readKey(key),
-    async presignPut() {
-      return null; // Blob uses its own client upload (handleUpload); not presigned
+    async presignPut(key, contentType) {
+      // OIDC-compatible client upload: issue a delegated token (server auth via
+      // OIDC), then a presigned PUT url the browser can upload to directly. This
+      // replaces handleUpload (which needs a static BLOB_READ_WRITE_TOKEN).
+      const { issueSignedToken, presignUrl } = await sdk();
+      try {
+        const signed = await issueSignedToken({ pathname: key, operations: ["put"] });
+        const { presignedUrl } = await presignUrl(signed, {
+          operation: "put",
+          pathname: key,
+          access: ACCESS,
+          allowedContentTypes: contentType ? [contentType] : undefined,
+          maximumSizeInBytes: 100 * 1024 * 1024,
+          allowOverwrite: true,
+          addRandomSuffix: false,
+        });
+        return presignedUrl;
+      } catch {
+        return null;
+      }
     },
   };
 }

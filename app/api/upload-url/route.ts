@@ -23,12 +23,8 @@ export async function POST(req: NextRequest) {
   const contentType = body.contentType || "application/octet-stream";
   const key = `uploads/${randomUUID()}-${filename}`;
 
-  if (storageProvider === "r2") {
-    const url = await storage.presignPut(key, contentType);
-    return NextResponse.json({ key, provider: "r2", url });
-  }
-  if (storageProvider === "blob") {
-    return NextResponse.json({ key, provider: "blob" });
-  }
-  return NextResponse.json({ key, provider: "none" });
+  // Both R2 and Blob now issue a presigned PUT url the browser uploads to
+  // directly. null (filesystem) → the client sends the file inline instead.
+  const url = await storage.presignPut(key, contentType);
+  return NextResponse.json({ key, url, provider: storageProvider });
 }
