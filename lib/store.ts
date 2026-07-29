@@ -107,7 +107,7 @@ export async function createProject(
   const now = Date.now();
   const project: Project = {
     id: randomUUID(),
-    company_name: company_name.trim() || "새 프로젝트",
+    company_name: company_name.trim() || "새 덱",
     one_liner: "",
     folder_id: folder_id && d.folders.some((f) => f.id === folder_id) ? folder_id : null,
     created_at: now,
@@ -151,7 +151,7 @@ export async function recordGeneration(
   p.versions += 1;
   p.latest_job_id = info.jobId;
   if (info.oneLiner) p.one_liner = info.oneLiner;
-  if (info.companyName && (!p.company_name || p.company_name === "새 프로젝트")) p.company_name = info.companyName;
+  if (info.companyName && (!p.company_name || p.company_name === "새 덱")) p.company_name = info.companyName;
   p.updated_at = Date.now();
   await persist(owner, d);
   return p;

@@ -54,8 +54,8 @@ const api = {
 };
 
 /**
- * 프로젝트 화면 — 새 프로젝트 만들기 + 폴더로 묶어 보기.
- * 폴더에 넣거나 뺄 수 있고, 폴더를 지워도 프로젝트는 미분류로 남는다.
+ * 덱 화면 — 새 덱 만들기 + 폴더로 묶어 보기.
+ * 폴더에 넣거나 뺄 수 있고, 폴더를 지워도 덱은 미분류로 남는다.
  */
 export default function Projects({
   onOpenProject,
@@ -137,7 +137,7 @@ export default function Projects({
     const detail = p.versions
       ? `버전 ${p.versions}개와 업로드한 자료가 모두 사라지며, 되돌릴 수 없습니다.`
       : `업로드한 자료가 사라지며, 되돌릴 수 없습니다.`;
-    if (!window.confirm(`'${p.company_name}' 프로젝트를 삭제할까요?\n${detail}`)) return;
+    if (!window.confirm(`'${p.company_name}' 덱을 삭제할까요?\n${detail}`)) return;
     setBusyId(p.id);
     try {
       await api.deleteProject(p.id);
@@ -228,7 +228,7 @@ export default function Projects({
   return (
     <div className="wrap narrow">
       <div className="card">
-        <h2 className="h2plain">새 프로젝트</h2>
+        <h2 className="h2plain">새 덱</h2>
         <div className="field">
           <label>회사명</label>
           <input
@@ -247,7 +247,7 @@ export default function Projects({
       <div className="card">
         <div className="row" style={{ marginBottom: 14 }}>
           <h2 className="h2plain" style={{ margin: 0, flex: 1 }}>
-            프로젝트
+            덱
           </h2>
           <input
             style={{ maxWidth: 200 }}
@@ -261,7 +261,7 @@ export default function Projects({
           </button>
         </div>
 
-        {projects.length === 0 && <p className="muted">아직 프로젝트가 없습니다. 위에서 새로 만드세요.</p>}
+        {projects.length === 0 && <p className="muted">아직 덱이 없습니다. 위에서 새로 만드세요.</p>}
 
         {folders.map((f) => {
           const rows = inFolder(f.id);
@@ -295,7 +295,7 @@ export default function Projects({
                 </button>
                 {confirmFolder === f.id ? (
                   <>
-                    <button className="small danger" onClick={() => removeFolder(f)} title="안의 프로젝트는 미분류로 남습니다">
+                    <button className="small danger" onClick={() => removeFolder(f)} title="안의 덱은 미분류로 남습니다">
                       정말 삭제
                     </button>
                     <button className="small" onClick={() => setConfirmFolder(null)}>
@@ -303,7 +303,7 @@ export default function Projects({
                     </button>
                   </>
                 ) : (
-                  <button className="small danger" onClick={() => setConfirmFolder(f.id)} title="폴더만 삭제 (안의 프로젝트는 미분류로 남음)">
+                  <button className="small danger" onClick={() => setConfirmFolder(f.id)} title="폴더만 삭제 (안의 덱은 미분류로 남음)">
                     폴더 삭제
                   </button>
                 )}
@@ -312,7 +312,7 @@ export default function Projects({
                 <div className="folder-body">
                   {rows.length === 0 ? (
                     <p className="muted" style={{ margin: "4px 0 8px" }}>
-                      비어 있음 — 프로젝트를 여기로 끌어다 놓으세요.
+                      비어 있음 — 덱을 여기로 끌어다 놓으세요.
                     </p>
                   ) : (
                     rows.map((p) => <ProjectRow key={p.id} p={p} />)
@@ -338,7 +338,7 @@ export default function Projects({
             <div className="folder-body">
               {ungrouped.length === 0 ? (
                 <p className="muted" style={{ margin: "4px 0 8px" }}>
-                  {folders.length > 0 ? "폴더에서 빼낸 프로젝트가 여기에 놓입니다." : "프로젝트가 없습니다."}
+                  {folders.length > 0 ? "폴더에서 빼낸 덱이 여기에 놓입니다." : "덱이 없습니다."}
                 </p>
               ) : (
                 ungrouped.map((p) => <ProjectRow key={p.id} p={p} />)

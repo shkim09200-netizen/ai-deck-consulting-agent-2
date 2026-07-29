@@ -19,13 +19,13 @@ const ASK_INTRO: ChatMsg = {
 
 /**
  * 세 화면을 상단 탭으로 오간다.
- *   프로젝트  — 목록/새로 만들기 + 폴더. 언제나 이동 가능.
- *   입력·생성 — 열어둔 프로젝트의 자료 업로드·생성. 프로젝트가 있어야 활성.
+ *   덱  — 목록/새로 만들기 + 폴더. 언제나 이동 가능.
+ *   입력·생성 — 열어둔 덱의 자료 업로드·생성. 덱이 있어야 활성.
  *   편집기    — Script/Skeleton 편집. 생성된 결과가 있어야 활성.
  */
 type View = "projects" | "input" | "editor";
 const TABS: Array<{ key: View; label: string }> = [
-  { key: "projects", label: "프로젝트" },
+  { key: "projects", label: "덱" },
   { key: "input", label: "입력 · 생성" },
   { key: "editor", label: "편집기" },
 ];
@@ -92,7 +92,7 @@ export default function App() {
               aria-selected={view === t.key}
               className={`navtab ${view === t.key ? "active" : ""}`}
               disabled={!enabled[t.key]}
-              title={enabled[t.key] ? "" : t.key === "input" ? "프로젝트를 먼저 여세요" : "먼저 생성하세요"}
+              title={enabled[t.key] ? "" : t.key === "input" ? "덱을 먼저 여세요" : "먼저 생성하세요"}
               onClick={() => go(t.key)}
             >
               {t.label}

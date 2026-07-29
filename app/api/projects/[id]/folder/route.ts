@@ -12,6 +12,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "잘못된 요청 본문입니다." }, { status: 400 });
   }
   const project = await moveProject(ownerFromRequest(req), id, body.folder_id ?? null);
-  if (!project) return NextResponse.json({ error: "프로젝트를 찾을 수 없습니다." }, { status: 404 });
+  if (!project) return NextResponse.json({ error: "덱을 찾을 수 없습니다." }, { status: 404 });
   return NextResponse.json(project);
 }

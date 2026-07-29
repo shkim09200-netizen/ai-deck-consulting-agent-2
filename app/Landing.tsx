@@ -2,7 +2,7 @@
 
 import { SparkWordmark } from "./SparkLogo";
 
-/** 랜딩 화면. "시작하기"를 누르면 프로젝트 창으로 들어간다. */
+/** 랜딩 화면. "시작하기"를 누르면 덱 창으로 들어간다. */
 export default function Landing({ onStart }: { onStart: () => void }) {
   return (
     <div className="landing">

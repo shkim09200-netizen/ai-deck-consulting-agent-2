@@ -24,6 +24,6 @@ export async function POST(req: NextRequest) {
     const hint = /EROFS|read-only|EACCES|EPERM|ENOENT/i.test(msg)
       ? " — 서버 디스크에 쓸 수 없습니다. 쓰기 가능한 디스크가 있는 서버(예: Railway)가 필요합니다."
       : "";
-    return NextResponse.json({ error: `프로젝트를 만들지 못했습니다: ${msg}${hint}` }, { status: 500 });
+    return NextResponse.json({ error: `덱을 만들지 못했습니다: ${msg}${hint}` }, { status: 500 });
   }
 }
