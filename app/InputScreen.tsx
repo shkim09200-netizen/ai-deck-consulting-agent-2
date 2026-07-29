@@ -357,7 +357,7 @@ export default function InputScreen({ projectId, onOpenEditor }: Props) {
               onDrop={(e) => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}
             >
               <div className="big">파일을 끌어다 놓거나 클릭</div>
-              <small>IR Deck · 이전 덱(PPTX) · 원페이저 · IR 자료 · 이미지 — 그냥 다 넣으세요 (PDF, DOCX, PPTX, XLSX, 이미지, TXT)</small>
+              <small>IR Deck · 이전 덱(PPTX) · 원페이저 · IR 자료 · 이미지 — 형식 구분 없이 자유롭게 올려주세요 (PDF, DOCX, PPTX, XLSX, 이미지, TXT)</small>
               <input
                 ref={inputRef} type="file" multiple hidden
                 onChange={(e) => addFiles(e.target.files)}
