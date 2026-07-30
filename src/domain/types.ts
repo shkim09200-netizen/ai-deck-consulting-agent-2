@@ -95,18 +95,13 @@ export interface ScriptSection {
   key: string;
   /** section header label as it appears in the doc, e.g. "Problem & Existing Solutions" */
   title: string;
-  /**
-   * Ordered lines. A line ending in a `(click)` beat marks a slide-advance /
-   * build point (§ real-sample house style). Kept as structured beats so the
-   * skeleton stage can split slides on them.
-   */
+  /** Ordered spoken lines for this section. The skeleton stage splits slides by
+   *  message/content — there are no `(click)` markers. */
   beats: ScriptBeat[];
 }
 
 export interface ScriptBeat {
   text: string;
-  /** true if this beat ends on a `(click)` — i.e. advance the deck after it */
-  click: boolean;
 }
 
 export interface ScriptDoc {

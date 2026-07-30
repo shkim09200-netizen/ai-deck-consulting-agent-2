@@ -154,7 +154,7 @@ export async function generateScript(
  * Shared by initial generation and the edit path so flags stay consistent.
  */
 export function finalizeScript(
-  rawSections: Array<{ key: string; title: string; beats: Array<{ text: string; click: boolean }> }>,
+  rawSections: Array<{ key: string; title: string; beats: Array<{ text: string }> }>,
   companyName: string,
   presentationMinutes: number,
 ): ScriptDoc {
@@ -175,7 +175,7 @@ export function alignScriptToSlides(skeleton: SkeletonDoc, companyName: string, 
     no: sl.no,
     key: sl.sectionKey,
     title: (sl.eyebrow || sl.headline || sl.sectionKey || `Slide ${sl.no}`).trim(),
-    beats: sl.speakerNotes?.trim() ? [{ text: sl.speakerNotes.trim(), click: false }] : [],
+    beats: sl.speakerNotes?.trim() ? [{ text: sl.speakerNotes.trim() }] : [],
   }));
   const flags: Flag[] = sections.flatMap((s) =>
     s.beats.flatMap((b) => extractConfirmFlags(b.text, `슬라이드 ${s.no} (${s.title})`)),
@@ -191,7 +191,7 @@ export async function generateSkeleton(
   opts?: { sectorGuide?: string; directives?: string; gap?: GapAnalysis },
 ): Promise<SkeletonDoc> {
   const scriptText = script.sections
-    .map((s) => `(${s.title}) [§${s.no}]\n${s.beats.map((b) => b.text + (b.click ? " (click)" : "")).join("\n")}`)
+    .map((s) => `(${s.title}) [§${s.no}]\n${s.beats.map((b) => b.text).join("\n")}`)
     .join("\n\n");
 
   const gapBlock = opts?.gap

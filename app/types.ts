@@ -2,7 +2,6 @@
 
 export interface Beat {
   text: string;
-  click: boolean;
 }
 export interface ScriptSection {
   no: number;

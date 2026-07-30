@@ -510,7 +510,7 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
                 {enData.script.sections.map((s) => (
                   <div className="en-sec" key={s.no}>
                     <div className="st"><span className="no">§{s.no}</span>{s.title}</div>
-                    {s.beats.map((b, i) => <div className="beat" key={i}>{b.text}{b.click && <span className="click"> (click)</span>}</div>)}
+                    {s.beats.map((b, i) => <div className="beat" key={i}>{b.text}</div>)}
                   </div>
                 ))}
               </div>
@@ -662,20 +662,12 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
                           onChange={(e) => editScript((d) => { d.sections[si]!.beats[bi]!.text = e.target.value; })}
                         />
                         <div className="beat-tools">
-                          <label className="clk">
-                            <input
-                              type="checkbox"
-                              checked={b.click}
-                              onChange={() => editScript((d) => { const beat = d.sections[si]!.beats[bi]!; beat.click = !beat.click; })}
-                            />
-                            (click)
-                          </label>
                           <button className="ghost xs" onClick={() => editScript((d) => { d.sections[si]!.beats.splice(bi, 1); })}>삭제</button>
                         </div>
                       </div>
                     );
                   })}
-                  <button className="ghost xs add" onClick={() => editScript((d) => { d.sections[si]!.beats.push({ text: "", click: false }); })}>+ 대사 추가</button>
+                  <button className="ghost xs add" onClick={() => editScript((d) => { d.sections[si]!.beats.push({ text: "" }); })}>+ 대사 추가</button>
                 </div>
               ))}
             </div>

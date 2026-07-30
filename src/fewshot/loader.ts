@@ -61,5 +61,5 @@ export function renderExemplars(examples: FewShotExample[]): string {
   const blocks = examples
     .map((e, i) => `--- 예시 ${i + 1} (${e.name}) ---\n${e.text}`)
     .join("\n\n");
-  return `아래는 승인된 우수 스크립트 예시다. 구조·어조·(click) 사용·숫자 밀도를 참고하되, 내용은 절대 복사하지 말고 현재 회사 정보만으로 작성하라.\n\n${blocks}`;
+  return `아래는 승인된 우수 스크립트 예시다. 구조·어조·숫자 밀도를 참고하되, 내용은 절대 복사하지 말고 현재 회사 정보만으로 작성하라. (예시에 (click) 표기가 있어도 무시하라 — 이제 쓰지 않는다.)\n\n${blocks}`;
 }

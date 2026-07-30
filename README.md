@@ -37,9 +37,9 @@ npm run generate -- ./inputs/acme --url https://acme.com --approve
 
 1. **Ingestion** — docx/pdf/xlsx/csv/이미지/URL 파싱 → `CompanyInput` (Claude vision, 숫자 창작 금지)
 2. **명확화 게이트** — 필수 누락 정보는 지어내지 않고 질문 생성 (§5.2)
-3. **Step 1 Script** — `(click)` 마커·`[CONFIRM]` 포함 구어체 대본 (§4.1)
+3. **Step 1 Script** — `[CONFIRM]` 포함 구어체 대본 (§4.1)
 4. **승인 게이트** — Script 승인 전 Skeleton 미생성 (§ 품질 원칙 #1)
-5. **Step 2 Skeleton** — `(click)` 기준 슬라이드 분할, 노트=대본 매핑, 체크리스트 미충족 시 `[NEEDS INPUT]` (§4.2·4.4·4.5)
+5. **Step 2 Skeleton** — 내용(메시지) 단위 슬라이드 분할, 슬라이드별 speakerNotes=대본(대본은 슬라이드 번호로 1:1 정렬), 체크리스트 미충족 시 `[NEEDS INPUT]` (§4.2·4.4·4.5)
 6. **AI Review + 통합 트래커** — High/Med/Low 지적 + 모든 `[CONFIRM]`/`[NEEDS INPUT]` 집계 (§8-5·§9)
 
 ## 하우스 스타일 커스터마이징

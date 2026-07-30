@@ -25,7 +25,7 @@ function deckContext(
   review?: ReviewLike[],
 ): string {
   const scriptStr = script.sections
-    .map((s) => `§${s.no} (${s.title})\n` + s.beats.map((b) => `  - ${b.text}${b.click ? "  (click)" : ""}`).join("\n"))
+    .map((s) => `§${s.no} (${s.title})\n` + s.beats.map((b) => `  - ${b.text}`).join("\n"))
     .join("\n");
 
   const slideStr = skeleton.slides

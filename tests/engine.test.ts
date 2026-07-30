@@ -21,10 +21,10 @@ const sampleScript: ScriptDoc = {
   companyName: "테스트컴퍼니",
   presentationMinutes: 7,
   sections: [
-    { no: 1, key: "intro", title: "Intro", beats: [{ text: "안녕하세요, 테스트컴퍼니입니다.", click: true }] },
+    { no: 1, key: "intro", title: "Intro", beats: [{ text: "안녕하세요, 테스트컴퍼니입니다." }] },
     { no: 2, key: "traction", title: "Traction", beats: [
-      { text: "작년 매출 [CONFIRM: 정확한 MRR 수치] 를 기록했습니다.", click: true },
-      { text: "올해 30억을 목표합니다.", click: false },
+      { text: "작년 매출 [CONFIRM: 정확한 MRR 수치] 를 기록했습니다." },
+      { text: "올해 30억을 목표합니다." },
     ] },
   ],
   flags: [],

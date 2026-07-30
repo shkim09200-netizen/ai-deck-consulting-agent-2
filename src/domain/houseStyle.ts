@@ -9,7 +9,7 @@
  * structure is:
  *   (Intro) (Market) (Problem & Existing Solutions) (Our Solution)
  *   (Business Model) (Traction) (Team) (Vision)
- * with inline `(click)` beat markers driving slide advances/builds.
+ * Slides are split by content in the skeleton stage — no inline `(click)` marks.
  */
 
 export interface SectionDef {
@@ -26,7 +26,7 @@ export interface SectionDef {
  * Scale-up → Team → Vision. (Traction은 Business Model보다 앞, 투자자 스토리라인.)
  */
 export const SCRIPT_STRUCTURE: SectionDef[] = [
-  { key: "intro", title: "Intro", guidance: "발표자 이름과 회사명으로 짧게 시작. 한 문장, `(click)`으로 마무리." },
+  { key: "intro", title: "Intro", guidance: "발표자 이름과 회사명으로 짧게 시작. 한두 문장으로 마무리." },
   { key: "market", title: "Market", guidance: "시장 규모(TAM/SAM/SOM, 현재→미래 CAGR)와 왜 지금인지. 숫자는 반드시 소스 근거." },
   { key: "problem", title: "Problem & Existing Solutions", guidance: "구체적 타겟 유저 + 일반론이 아닌 구체적 문제. 기존 대안과 그 한계를 함께. '첫째/둘째/셋째' 구조 권장." },
   { key: "our_solution", title: "Our Solution", guidance: "제품이 무엇을, 어떻게 해결하는지, 왜 더 나은지를 번호(첫 번째로/두 번째로…)로 제시. 정량 개선치 포함." },
@@ -123,10 +123,9 @@ export const HOUSE_STYLE_RULES = `
 - 한국어. 실제 무대에서 말하듯 자연스러운 구어체("~습니다", "~인데요"). 보고서 문체 금지.
 - 문장은 짧고 명료하게. 청중이 귀로 듣고 이해할 수 있어야 한다.
 
-[구조와 (click) 마커]
+[구조]
 - 각 섹션은 괄호 헤더로 시작한다. 예: (Intro) (Market) (Problem & Existing Solutions) ...
-- 슬라이드를 넘기거나 화면 요소를 빌드해야 하는 지점마다 그 beat 끝에 (click) 을 둔다.
-- 한 문장이라도 강조가 필요하면 여러 beat로 쪼개 각각 (click)을 붙인다.
+- 슬라이드 분할은 스켈레톤 단계가 내용(메시지) 단위로 정한다. click 같은 전환 마커는 쓰지 않는다.
 
 [환각 방지 — 최우선]
 - 제공되지 않은 통계·인용·주장·숫자는 절대 지어내지 않는다.

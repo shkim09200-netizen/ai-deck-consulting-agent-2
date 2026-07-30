@@ -4,8 +4,8 @@ import type { ScriptDoc } from "../domain/types.js";
 
 const PT = (n: number) => n * 2; // docx uses half-points
 
-/** Split a beat into runs, highlighting [CONFIRM: ...] and (click). */
-function beatRuns(text: string, click: boolean): TextRun[] {
+/** Split a beat into runs, highlighting [CONFIRM: ...]. */
+function beatRuns(text: string): TextRun[] {
   const runs: TextRun[] = [];
   const re = /\[CONFIRM:[^\]]*\]/g;
   let last = 0;
@@ -16,7 +16,6 @@ function beatRuns(text: string, click: boolean): TextRun[] {
     last = idx + m[0].length;
   }
   if (last < text.length) runs.push(new TextRun({ text: text.slice(last), size: PT(11) }));
-  if (click) runs.push(new TextRun({ text: " (click)", size: PT(11), color: "888888", italics: true }));
   return runs;
 }
 
@@ -44,7 +43,7 @@ export function buildScriptDocument(doc: ScriptDoc, lang: "ko" | "en" = "ko"): D
       }),
     );
     for (const b of s.beats) {
-      children.push(new Paragraph({ spacing: { after: 60 }, children: beatRuns(b.text, b.click) }));
+      children.push(new Paragraph({ spacing: { after: 60 }, children: beatRuns(b.text) }));
     }
     children.push(new Paragraph({ text: "" }));
   }

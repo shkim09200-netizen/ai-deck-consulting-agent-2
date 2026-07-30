@@ -19,8 +19,8 @@ describe("edit finalize helpers", () => {
   it("finalizeScript renumbers sections 1..N and re-extracts [CONFIRM]", () => {
     const doc = finalizeScript(
       [
-        { key: "intro", title: "Intro", beats: [{ text: "안녕하세요", click: true }] },
-        { key: "traction", title: "Traction", beats: [{ text: "매출 [CONFIRM: MRR] 기록", click: false }] },
+        { key: "intro", title: "Intro", beats: [{ text: "안녕하세요" }] },
+        { key: "traction", title: "Traction", beats: [{ text: "매출 [CONFIRM: MRR] 기록" }] },
       ],
       "테스트컴퍼니",
       7,
@@ -47,7 +47,7 @@ describe("edit finalize helpers", () => {
 
   it("an edited beat flows through finalize into the unified tracker", () => {
     const script = finalizeScript(
-      [{ key: "problem", title: "Problem", beats: [{ text: "고객이 [CONFIRM: 몇 명] 있습니다", click: false }] }],
+      [{ key: "problem", title: "Problem", beats: [{ text: "고객이 [CONFIRM: 몇 명] 있습니다" }] }],
       "테스트컴퍼니",
       7,
     );
