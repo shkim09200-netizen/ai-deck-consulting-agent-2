@@ -57,7 +57,7 @@ function computeTracker(script: ScriptDoc, skeleton: SkeletonDoc): TrackerItem[]
   };
   for (const s of script.sections) {
     for (const b of s.beats) {
-      for (const m of b.text.matchAll(CONFIRM_RE)) push("CONFIRM", `Script §${s.no} (${s.title})`, m[1]!.trim());
+      for (const m of b.text.matchAll(CONFIRM_RE)) push("CONFIRM", `대본 슬라이드 ${s.no} (${s.title})`, m[1]!.trim());
     }
   }
   for (const sl of skeleton.slides) {
@@ -412,7 +412,7 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
         setSkeleton(j.skeleton);
         setDirty(true);
         const changed: string[] = [];
-        if (j.changedScriptSections?.length) changed.push(`Script §${j.changedScriptSections.join(", §")}`);
+        if (j.changedScriptSections?.length) changed.push(`대본 슬라이드 ${j.changedScriptSections.join(", ")}`);
         if (j.changedSlides?.length) changed.push(`Slide ${j.changedSlides.join(", ")}`);
         setChat((c) => [
           ...c,
@@ -509,7 +509,7 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
               <div className="en-col en-script">
                 {enData.script.sections.map((s) => (
                   <div className="en-sec" key={s.no}>
-                    <div className="st"><span className="no">§{s.no}</span>{s.title}</div>
+                    <div className="st"><span className="no">슬라이드 {s.no}</span>{s.title}</div>
                     {s.beats.map((b, i) => <div className="beat" key={i}>{b.text}</div>)}
                   </div>
                 ))}
@@ -643,7 +643,7 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
                   className={`sec-block${hlSection === s.no ? " hl" : ""}`}
                 >
                   <div className="sec-head">
-                    <span className="no">§{s.no}</span>
+                    <span className="no">슬라이드 {s.no}</span>
                     <input
                       className="tin"
                       value={s.title}
@@ -691,12 +691,12 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
                   >
                     <div className="slide-h">
                       <span className="sec">{sectionTitleOf(sl.sectionKey)}</span>
-                      <span>Slide {sl.no}</span>
+                      <span>슬라이드 {sl.no}</span>
                       <span className="layout-chip">{sl.layout}</span>
                       {sl.scriptRefs.map((r, ri) => {
                         const no = refToSectionNo(r);
                         return no ? (
-                          <button key={ri} className="ref-chip" title="연결된 스크립트로 이동" onClick={() => goSection(no)}>§{no}</button>
+                          <button key={ri} className="ref-chip" title="연결된 스크립트로 이동" onClick={() => goSection(no)}>슬라이드 {no}</button>
                         ) : null;
                       })}
                       <div className="spacer" />

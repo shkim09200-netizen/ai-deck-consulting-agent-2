@@ -7,6 +7,7 @@ import { extractConfirmFlags, extractNeedsInputFlags, buildTracker, renderTracke
 import { buildScriptDocument } from "../src/render/docx.js";
 import { Packer } from "docx";
 import { writeSkeletonPptx } from "../src/render/pptx.js";
+import { alignScriptToSlides } from "../src/llm/pipeline.js";
 import { loadScriptExemplars } from "../src/fewshot/loader.js";
 import { SCRIPT_TO_SKELETON, SKELETON_STRUCTURE, SECTION_CHECKLIST } from "../src/domain/houseStyle.js";
 import type { ScriptDoc, SkeletonDoc, Slide } from "../src/domain/types.js";
@@ -101,6 +102,14 @@ describe("fewshot loader", () => {
     // samples/scripts is populated in this repo
     expect(ex.length).toBeGreaterThan(0);
     expect(ex[0]!.text.length).toBeGreaterThan(100);
+  });
+});
+
+describe("script ↔ slide alignment", () => {
+  it("produces exactly one script section per slide (1:1)", () => {
+    const doc = alignScriptToSlides(sampleSkeleton, "테스트컴퍼니", 7);
+    expect(doc.sections.length).toBe(sampleSkeleton.slides.length);
+    expect(doc.sections.map((s) => s.no)).toEqual(sampleSkeleton.slides.map((s) => s.no));
   });
 });
 
