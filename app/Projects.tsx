@@ -25,11 +25,11 @@ const jf = async (res: Response) => {
 const api = {
   listProjects: (): Promise<Project[]> => fetch("/api/projects").then(jf),
   listFolders: (): Promise<Folder[]> => fetch("/api/folders").then(jf),
-  createProject: (company_name: string): Promise<Project> =>
+  createProject: (company_name: string, folder_id?: string | null): Promise<Project> =>
     fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ company_name }),
+      body: JSON.stringify({ company_name, folder_id: folder_id ?? null }),
     }).then(jf),
   deleteProject: (id: string) => fetch(`/api/projects/${id}`, { method: "DELETE" }).then(jf),
   moveProject: (id: string, folder_id: string | null) =>
@@ -67,6 +67,7 @@ export default function Projects({
   const [projects, setProjects] = useState<Project[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [companyName, setCompanyName] = useState("");
+  const [newDeckFolder, setNewDeckFolder] = useState<string>(""); // folder for the deck being created ("" = none)
   const [newFolder, setNewFolder] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [confirmFolder, setConfirmFolder] = useState<string | null>(null);
@@ -90,7 +91,7 @@ export default function Projects({
   async function create() {
     setError("");
     try {
-      const p = await api.createProject(companyName.trim());
+      const p = await api.createProject(companyName.trim(), newDeckFolder || null);
       setCompanyName("");
       onOpenProject(p.id);
     } catch (e) {
@@ -238,6 +239,19 @@ export default function Projects({
             placeholder="예: (주)스파크컴퍼니"
           />
         </div>
+        {folders.length > 0 && (
+          <div className="field">
+            <label>폴더 <span className="muted">(선택)</span></label>
+            <select value={newDeckFolder} onChange={(e) => setNewDeckFolder(e.target.value)}>
+              <option value="">폴더 없음</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <button className="primary" style={{ width: "auto", marginTop: 0 }} disabled={!companyName.trim()} onClick={create}>
           시작하기
         </button>
