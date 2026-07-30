@@ -206,7 +206,7 @@ export async function generateSkeleton(
     toolDescription: "레이아웃 기반 슬라이드 설계(near-final)를 반환한다.",
     inputSchema: skeletonJsonSchema,
     validator: skeletonValidator,
-    maxTokens: 28000,
+    maxTokens: 32000, // fuller per-slide speakerNotes (now the final script) need headroom
   });
 
   return finalizeSkeleton(raw.slides, input, raw.accentColor, opts?.gap);
