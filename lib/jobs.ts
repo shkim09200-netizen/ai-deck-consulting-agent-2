@@ -125,9 +125,42 @@ export async function getOrLoadJob(id: string): Promise<Job | undefined> {
   const stored = await storage.getJson<Job>(jobJsonKey(id));
   if (stored) {
     jobs.set(id, stored);
+    await reconcileResult(stored);
     return stored;
   }
-  return jobs.get(id);
+  const local = jobs.get(id);
+  if (local) await reconcileResult(local);
+  return local;
+}
+
+/**
+ * Self-heal legacy decks whose stored script predates 1:1 slide alignment, so
+ * the script section count doesn't match the slide count (e.g. an old 빔스튜디오
+ * deck: 9 narrative sections vs 15 slides). Rebuild the script from the slides
+ * (one entry per slide, from its speakerNotes) and re-render the docx so both the
+ * on-screen script and the download always have exactly one entry per slide.
+ * Pure/offline (no LLM key needed); idempotent — a no-op once counts agree.
+ */
+async function reconcileResult(job: Job): Promise<void> {
+  const r = job.result;
+  if (!r?.skeleton?.slides) return;
+  const slideCount = r.skeleton.slides.length;
+  const sectionCount = r.script?.sections?.length ?? 0;
+  if (slideCount === 0 || slideCount === sectionCount) return;
+
+  const aligned = alignScriptToSlides(r.skeleton, r.companyName, r.presentationMinutes);
+  r.script = aligned;
+  r.tracker = buildTracker(aligned, r.skeleton);
+  try {
+    const scriptDocx = r.files.scriptDocx || `${safeName(r.companyName)}_script_v0.1.docx`;
+    const buf = await renderScriptDocxBuffer(aligned, "ko");
+    await storage.putBinary(jobFileKey(job.id, scriptDocx), buf, DOCX_MIME);
+    r.files.scriptDocx = scriptDocx;
+  } catch {
+    /* best-effort: on-screen script is fixed even if re-render fails */
+  }
+  bump(job);
+  await persistJob(job);
 }
 
 /**
