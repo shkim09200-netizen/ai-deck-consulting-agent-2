@@ -170,12 +170,22 @@ export function finalizeScript(
  * entry per slide (using that slide's speakerNotes), instead of section blocks
  * split by ambiguous `(click)` marks. The numbers in the script == slide numbers.
  */
+/** Break a slide's speaker script into a few lines (by line-break, else by
+ *  sentence) so it reads as several beats — not one dense paragraph. */
+function toBeats(notes: string): { text: string }[] {
+  const clean = (notes ?? "").trim();
+  if (!clean) return [];
+  let parts = clean.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 1) parts = clean.split(/(?<=[.!?。…])\s+/).map((s) => s.trim()).filter(Boolean);
+  return (parts.length ? parts : [clean]).map((text) => ({ text }));
+}
+
 export function alignScriptToSlides(skeleton: SkeletonDoc, companyName: string, presentationMinutes: number): ScriptDoc {
   const sections = skeleton.slides.map((sl) => ({
     no: sl.no,
     key: sl.sectionKey,
     title: (sl.eyebrow || sl.headline || sl.sectionKey || `Slide ${sl.no}`).trim(),
-    beats: sl.speakerNotes?.trim() ? [{ text: sl.speakerNotes.trim() }] : [],
+    beats: toBeats(sl.speakerNotes ?? ""),
   }));
   const flags: Flag[] = sections.flatMap((s) =>
     s.beats.flatMap((b) => extractConfirmFlags(b.text, `슬라이드 ${s.no} (${s.title})`)),
