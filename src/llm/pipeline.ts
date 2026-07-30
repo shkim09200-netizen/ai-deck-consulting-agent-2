@@ -292,7 +292,8 @@ export function finalizeSkeleton(
       visual: sl.visual,
       memo: sl.memo,
       speakerNotes: sl.speakerNotes,
-      scriptRefs: sl.scriptRefs,
+      scriptRefs: [String(no)], // 대본은 슬라이드에 1:1 정렬되므로 슬라이드 N의 대본은 항상 섹션 N
+
       flags: dedupeFlags([...inlineFlags, ...checklistFlags]),
       status,
       checklist,

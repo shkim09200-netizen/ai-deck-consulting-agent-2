@@ -307,7 +307,7 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
     editSkeleton((d) => { const sl = d.slides[i]; if (sl) mut(sl); });
   }, [editSkeleton]);
 
-  const renumberSlides = (s: SkeletonDoc) => s.slides.forEach((sl, i) => (sl.no = i + 1));
+  const renumberSlides = (s: SkeletonDoc) => s.slides.forEach((sl, i) => { sl.no = i + 1; sl.scriptRefs = [String(i + 1)]; });
 
   // pick a design variant: reflect it in the preview AND bake it into the
   // skeleton so a saved export / default download renders the chosen look.
@@ -325,7 +325,10 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
     flash(setHlSection, no);
   };
   const goSlidesFor = (sectionNo: number) => {
-    const target = skeleton.slides.find((sl) => sl.scriptRefs.some((r) => refToSectionNo(r) === sectionNo));
+    // 대본↔슬라이드는 1:1(같은 번호). 같은 번호 슬라이드를 우선하고, 없으면 scriptRefs로 폴백.
+    const target =
+      skeleton.slides.find((sl) => sl.no === sectionNo) ??
+      skeleton.slides.find((sl) => sl.scriptRefs.some((r) => refToSectionNo(r) === sectionNo));
     if (target) {
       slideRefs.current.get(target.no)?.scrollIntoView({ behavior: "smooth", block: "center" });
       flash(setHlSlide, target.no);
@@ -693,12 +696,7 @@ export default function EditWorkspace({ jobId, result, onBack, chat, setChat, as
                       <span className="sec">{sectionTitleOf(sl.sectionKey)}</span>
                       <span>슬라이드 {sl.no}</span>
                       <span className="layout-chip">{sl.layout}</span>
-                      {sl.scriptRefs.map((r, ri) => {
-                        const no = refToSectionNo(r);
-                        return no ? (
-                          <button key={ri} className="ref-chip" title="연결된 스크립트로 이동" onClick={() => goSection(no)}>슬라이드 {no}</button>
-                        ) : null;
-                      })}
+                      <button className="ref-chip" title="이 슬라이드의 대본으로 이동" onClick={() => goSection(sl.no)}>▸ 대본</button>
                       <div className="spacer" />
                       <button className="ghost xs" onClick={() => editSkeleton((d) => { d.slides.splice(sli + 1, 0, { ...emptySlide(0), sectionKey: sl.sectionKey }); renumberSlides(d); })}>+ 아래 추가</button>
                       <button className="ghost xs del" onClick={() => editSkeleton((d) => { d.slides.splice(sli, 1); renumberSlides(d); })}>삭제</button>
