@@ -7,6 +7,7 @@ import {
   analyzeGaps,
   generateScript,
   generateSkeleton,
+  writeSlideScripts,
   reviewDeck,
   alignScriptToSlides,
 } from "@engine/llm/pipeline.js";
@@ -33,6 +34,7 @@ const STAGE_DEFS: Array<{ key: string; label: string }> = [
   { key: "clarify", label: "명확화 질문 확인" },
   { key: "script", label: "Step 1 — Script 생성" },
   { key: "skeleton", label: "Step 2 — Skeleton 생성" },
+  { key: "narrate", label: "슬라이드별 대본 작성" },
   { key: "review", label: "AI Review + 통합 트래커" },
 ];
 
@@ -58,7 +60,7 @@ export interface JobResult {
 /** How far the staged pipeline has progressed. Each client-driven step advances
  * this one notch so no single request runs the whole (multi-minute) pipeline —
  * required to stay under a serverless function's time limit. */
-export type JobPhase = "ingested" | "scripted" | "skeletoned" | "done";
+export type JobPhase = "ingested" | "scripted" | "skeletoned" | "narrated" | "done";
 
 /** Intermediate pipeline state carried between steps (persisted with the job). */
 interface JobWork {
@@ -293,6 +295,16 @@ export async function advanceJob(job: Job): Promise<Job> {
       job.work.skeleton = skeleton;
       job.phase = "skeletoned";
     } else if (job.phase === "skeletoned") {
+      // Dedicated script pass: write full, evenly-dense speakerNotes per slide so
+      // the final script is substantive and never tapers off on later slides.
+      const { input, skeleton } = job.work;
+      setStage(job, "narrate", "active");
+      const narrated = await writeSlideScripts(input, skeleton!, { directives: job.directives });
+      const filled = narrated.slides.filter((s) => (s.speakerNotes ?? "").trim().length > 0).length;
+      setStage(job, "narrate", "done", `${filled}/${narrated.slides.length}개 슬라이드 대본 완성`);
+      job.work.skeleton = narrated;
+      job.phase = "narrated";
+    } else if (job.phase === "narrated") {
       const { input, script, skeleton, gap, clarifications } = job.work;
       setStage(job, "review", "active");
       const review = await reviewDeck(script!, skeleton!);

@@ -4,10 +4,11 @@ import {
   companyInputJsonSchema, companyInputValidator,
   clarificationJsonSchema, clarificationValidator, type Clarifications,
   scriptJsonSchema, scriptValidator,
+  slideNotesJsonSchema, slideNotesValidator,
   skeletonJsonSchema, skeletonValidator, type SkeletonOutput,
   reviewJsonSchema, reviewValidator, type ReviewOutput,
 } from "./schemas.js";
-import { ingestionSystem, clarificationSystem, gapSystem, scriptSystem, skeletonSystem, reviewSystem } from "./prompts.js";
+import { ingestionSystem, clarificationSystem, gapSystem, scriptSystem, skeletonSystem, slideNotesSystem, reviewSystem } from "./prompts.js";
 import {
   gapJsonSchema, gapValidator,
 } from "./schemas.js";
@@ -178,6 +179,86 @@ function toBeats(notes: string): { text: string }[] {
   let parts = clean.split(/\n+/).map((s) => s.trim()).filter(Boolean);
   if (parts.length <= 1) parts = clean.split(/(?<=[.!?。…])\s+/).map((s) => s.trim()).filter(Boolean);
   return (parts.length ? parts : [clean]).map((text) => ({ text }));
+}
+
+/**
+ * Dedicated per-slide script pass. Writing the full spoken script for every
+ * slide *inside* the one big skeleton call makes the model taper off — later
+ * slides get thin/empty notes, so the final script looks "cut off in the
+ * middle". Here we (re)write complete speakerNotes in small parallel batches
+ * (prose only, no structural JSON), so every slide — including the last ones —
+ * gets a substantive, evenly-dense script. Failed batches keep the draft notes.
+ */
+export async function writeSlideScripts(
+  input: CompanyInput,
+  skeleton: SkeletonDoc,
+  opts?: { directives?: string },
+): Promise<SkeletonDoc> {
+  const slides = skeleton.slides;
+  if (slides.length === 0) return skeleton;
+
+  const BATCH = 5;
+  const batches: Slide[][] = [];
+  for (let i = 0; i < slides.length; i += BATCH) batches.push(slides.slice(i, i + BATCH));
+
+  const system = slideNotesSystem({
+    presentationMinutes: skeleton.presentationMinutes,
+    totalSlides: slides.length,
+    directives: opts?.directives,
+  });
+
+  const slideBrief = (sl: Slide): string => {
+    const bits: string[] = [`슬라이드 ${sl.no} [${sl.layout}] (${SECTION_LABEL[sl.sectionKey] ?? sl.sectionKey})`];
+    if (sl.eyebrow) bits.push(`eyebrow: ${sl.eyebrow}`);
+    if (sl.headline) bits.push(`headline: ${sl.headline}`);
+    if (sl.subhead) bits.push(`subhead: ${sl.subhead}`);
+    if (sl.bullets.length) bits.push(`bullets: ${sl.bullets.map((b) => b.text).join(" / ")}`);
+    if (sl.metrics.length) bits.push(`metrics: ${sl.metrics.map((m) => `${m.value} ${m.label}`).join(" / ")}`);
+    if (sl.columns.length) bits.push(`columns: ${sl.columns.map((c) => `${c.heading}(${c.items.join(", ")})`).join(" | ")}`);
+    if (sl.steps.length) bits.push(`steps: ${sl.steps.map((s) => s.title).join(" → ")}`);
+    if (sl.team.length) bits.push(`team: ${sl.team.map((t) => `${t.name}${t.role ? "/" + t.role : ""}`).join(", ")}`);
+    if (sl.chart) bits.push(`chart: ${sl.chart.title ?? ""} (${sl.chart.categories.join(", ")})`);
+    if (sl.speakerNotes?.trim()) bits.push(`초안 노트(참고): ${sl.speakerNotes.trim()}`);
+    return bits.join("\n");
+  };
+
+  const companyContext = [
+    `회사: ${input.companyName}`,
+    input.oneLiner ? `한줄소개: ${input.oneLiner}` : "",
+    input.problem ? `문제: ${input.problem}` : "",
+    input.ourSolution ? `솔루션: ${input.ourSolution}` : "",
+    input.differentiators ? `차별점: ${input.differentiators}` : "",
+    input.traction?.quantitative?.length ? `트랙션: ${input.traction.quantitative.join(" / ")}` : "",
+  ].filter(Boolean).join("\n");
+
+  const results = await Promise.all(
+    batches.map((group) =>
+      callTool({
+        model: MODELS.generate,
+        system,
+        messages: [{
+          role: "user",
+          content: `${companyContext}\n\n아래 슬라이드들 각각에 대해 완전하고 충실한 발표 대본(speakerNotes)을 작성하라. 반드시 아래 모든 슬라이드 번호를 빠짐없이 반환한다.\n\n${group.map(slideBrief).join("\n\n---\n\n")}`,
+        }],
+        toolName: "emit_slide_notes",
+        toolDescription: "각 슬라이드의 완전한 발표 대본을 반환한다.",
+        inputSchema: slideNotesJsonSchema,
+        validator: slideNotesValidator,
+        maxTokens: 16000,
+      }).then((r) => r.notes).catch(() => [] as { no: number; speakerNotes: string }[]),
+    ),
+  );
+
+  const byNo = new Map<number, string>();
+  for (const batch of results) {
+    for (const n of batch) if (n.speakerNotes?.trim()) byNo.set(n.no, n.speakerNotes.trim());
+  }
+
+  const enriched: Slide[] = slides.map((sl) => ({
+    ...sl,
+    speakerNotes: byNo.get(sl.no) ?? sl.speakerNotes ?? "",
+  }));
+  return { ...skeleton, slides: enriched };
 }
 
 export function alignScriptToSlides(skeleton: SkeletonDoc, companyName: string, presentationMinutes: number): ScriptDoc {

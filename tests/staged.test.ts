@@ -17,6 +17,7 @@ vi.mock("@engine/llm/pipeline.js", () => ({
     ({ companyName: "테스트컴퍼니", presentationMinutes: 7, sections: [{ no: 1, key: "intro", title: "Intro", beats: [] }], flags: [] }) as any),
   generateSkeleton: vi.fn(async () =>
     ({ companyName: "테스트컴퍼니", presentationMinutes: 7, variant: "minimal", slides: [], flags: [] }) as any),
+  writeSlideScripts: vi.fn(async (_input: any, skeleton: any) => skeleton),
   reviewDeck: vi.fn(async () => ({ items: [] }) as any),
   alignScriptToSlides: (skeleton: any, companyName: string, presentationMinutes: number) =>
     ({
@@ -50,7 +51,7 @@ describe("staged generation (serverless-safe)", () => {
       s = snapshot(await advanceJob(loaded!));
     }
 
-    expect(guard).toBeLessThanOrEqual(4); // ingested → scripted → skeletoned → done
+    expect(guard).toBeLessThanOrEqual(4); // ingested → scripted → skeletoned → narrated → done
     expect(s.status).toBe("done");
     expect(s.result?.files.skeletonPptx).toMatch(/\.pptx$/);
     expect(s.result?.clarifications).toContain("질문?");

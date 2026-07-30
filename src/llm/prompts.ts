@@ -171,6 +171,39 @@ export function skeletonSystem(opts: { sectorGuide?: string; customStructure?: S
     .join("\n");
 }
 
+/**
+ * Dedicated per-slide script writer. Run as its own pass (not inside the big
+ * skeleton call) so the model doesn't taper off — every slide, including the
+ * last ones, gets a full, substantive, evenly-dense spoken script.
+ */
+export function slideNotesSystem(opts: { presentationMinutes: number; totalSlides: number; directives?: string }): string {
+  const perSlideSeconds = Math.max(20, Math.round((opts.presentationMinutes * 60) / Math.max(1, opts.totalSlides)));
+  return [
+    "너는 SparkLabs 데모데이 발표자가 무대에서 그대로 읽을 '발표 대본'을 쓰는 시니어 피칭 컨설턴트다.",
+    "이미 완성된 슬라이드 설계를 받았고, 각 슬라이드에서 발표자가 실제로 말할 완전한 구어체 대본(speakerNotes)을 슬라이드별로 작성한다. 이 대본이 최종 발표 대본으로 그대로 쓰인다.",
+    "",
+    PITCH_PRINCIPLES_SHORT,
+    "",
+    "[대본 품질 — 가장 중요]",
+    "- 화면의 headline/bullets/metrics/chart/columns/steps/team 을 '말로 풀어 설명하듯' 구성한다. 화면의 압축된 명사구를 그대로 읽지 말고, 왜 중요한지·무슨 의미인지·투자자가 무엇을 얻는지를 완결된 문장으로 풀어 말한다.",
+    "- 각 주장에는 근거(수치·사례·비교)를 붙여 설득력 있게. 단순 나열이 아니라 '그래서 무엇을 의미하는가(so-what)'까지 말한다.",
+    "- 부실하거나 뻔한 한 줄로 때우지 않는다. 내용이 얇으면 회사 정보(문제/솔루션/차별점/트랙션)에서 근거를 끌어와 살을 붙인다. 단, 자료에 없는 수치는 지어내지 말고 [CONFIRM: 무엇]으로 표기한다.",
+    "",
+    "[분량]",
+    `- 발표 전체 ${opts.presentationMinutes}분, 슬라이드 총 ${opts.totalSlides}장. 슬라이드당 평균 약 ${perSlideSeconds}초 분량으로 고르게 배분한다.`,
+    "- 슬라이드당 최소 3~6문장 이상, 발표해서 말이 되는 충분한 분량으로 쓴다(표지·클로징 등 짧아도 되는 슬라이드는 예외).",
+    "- **모든 슬라이드를 앞쪽과 같은 밀도로 채운다. 뒤로 갈수록 짧아지거나 비지 않게 한다. 어떤 슬라이드도 비우거나 한 문장으로 대충 끝내지 않는다.**",
+    "",
+    "[형식]",
+    "- 앞 슬라이드에서 자연스럽게 넘어오는 전환 문장으로 시작한다.",
+    "- 문장마다 줄바꿈(\\n)으로 나눠 여러 줄로 쓴다(읽고 발표하기 쉽게). 한 문단으로 붙여 쓰지 않는다.",
+    "- 받은 모든 슬라이드 번호(no)에 대해 빠짐없이 항목을 반환한다.",
+    directivesBlock(opts.directives),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function reviewSystem(): string {
   return [
     "너는 발표 스크립트와 스켈레톤을 SparkLabs 기준으로 최종 검토하는 시니어 피칭 컨설턴트다.",

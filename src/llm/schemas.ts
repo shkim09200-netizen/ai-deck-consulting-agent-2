@@ -195,6 +195,36 @@ export const scriptValidator = z.object({
 });
 export type ScriptOutput = z.infer<typeof scriptValidator>;
 
+/* ---------- Per-slide full script (dedicated pass so notes never taper) ---------- */
+
+export const slideNotesJsonSchema: Anthropic.Tool.InputSchema = {
+  type: "object",
+  properties: {
+    notes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          no: { type: "number", description: "슬라이드 번호" },
+          speakerNotes: {
+            type: "string",
+            description: "이 슬라이드에서 발표자가 실제로 말하는 완전한 구어체 대본. 여러 문장을 줄바꿈(\\n)으로 나눠 쓴다. 미확인 수치는 [CONFIRM: ...].",
+          },
+        },
+        required: ["no", "speakerNotes"],
+      },
+    },
+  },
+  required: ["notes"],
+};
+export const slideNotesValidator = z.object({
+  notes: jsonish(
+    z.array(z.object({ no: z.number(), speakerNotes: z.string().default("") })),
+    "notes",
+  ),
+});
+export type SlideNotesOutput = z.infer<typeof slideNotesValidator>;
+
 /* ---------- Skeleton generation (§4.2) — layout-aware design model ---------- */
 
 const chartJsonSchema = {
